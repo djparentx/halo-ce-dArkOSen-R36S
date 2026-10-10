@@ -89,9 +89,22 @@ kv "SDL_AUDIODRIVER"  "$SDL_AUDIODRIVER"
 kv "HALO_GL_THREAD"   "$HALO_GL_THREAD"
 kv "HALO_ASYNC_PROGS" "$HALO_ASYNC_PROGRAMS"
 
+# the maps: copied once out of an Xbox disc image (any name, .iso or .xiso)
+# in this folder or in ports; the image can be deleted afterwards
 if [ ! -s maps/ui.map ]; then
-	echo "no maps/ui.map in $GAMEDIR"
-	exit 1
+	shopt -s nullglob
+	images=({.,..}/*.{iso,ISO,xiso,XISO})
+	shopt -u nullglob
+	if [ "${#images[@]}" -eq 0 ]; then
+		echo "no maps folder and no disc image (.iso) in $GAMEDIR"
+		python3 halo_screen.py wait 60 "Halo needs your disc" "Copy the disc image of Halo: Combat Evolved for the Xbox (an .iso file) into ports/halo on the SD card, then start Halo again.
+
+Press a button to go back."
+		exit 1
+	fi
+	[ "${#images[@]}" -eq 1 ] || echo "${#images[@]} disc images: the first is used"
+	echo "copying the maps folder out of ${images[0]}"
+	python3 halo_extract.py --screen "${images[0]}" "$GAMEDIR" || exit 1
 fi
 
 # first start only: settings for this handheld (the game keeps and extends config.toml)
@@ -111,6 +124,14 @@ if [ -f sdl_mapping.py ] && command -v python3 > /dev/null; then
 	export SDL_GAMECONTROLLERCONFIG
 fi
 
+# the first start: the game builds its cache (save/z) before its first frame,
+# about a minute with a black screen; said first
+if [ ! -d save/z ]; then
+	python3 halo_screen.py wait 10 "Starting Halo" "The first start takes about a minute more, with a black screen, while the game sets up its cache. Later starts are quick.
+
+Press a button to go on."
+fi
+
 ./halo &
 child=$!
 trap 'kill -TERM "$child" 2> /dev/null' TERM INT HUP
@@ -121,5 +142,19 @@ while :; do
 done
 trap - TERM INT HUP
 echo "exit status $status"
-[ "$status" -eq 137 ] && echo "killed, most likely out of memory: set high_res_text = false and high_res_hud = false in config.toml"
+# 0: quit from the game; 130 and 143: stopped by a signal; 137: killed,
+# most likely by the kernel when memory ran out
+case "$status" in
+0 | 130 | 143) ;;
+137)
+	python3 halo_screen.py wait 30 "Halo was stopped" "The system stopped Halo (exit status 137), most likely because the handheld ran out of memory. In ports/halo/config.toml, set high_res_text = false and high_res_hud = false.
+
+Press a button to go back."
+	;;
+*)
+	python3 halo_screen.py wait 30 "Halo stopped" "Halo stopped unexpectedly (exit status $status). What happened is in ports/halo/log.txt.
+
+Press a button to go back."
+	;;
+esac
 exit "$status"
