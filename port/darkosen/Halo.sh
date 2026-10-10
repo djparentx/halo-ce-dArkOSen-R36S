@@ -1,5 +1,4 @@
 #!/bin/bash
-# port/darkosen/Halo.sh -> /roms2/ports/Halo.sh
 # Halo: Combat Evolved for dArkOSen (RK3326, Mali-G31).
 # The game folder is ./halo next to this script (/roms2/ports/halo).
 # First-build launcher: safe defaults, override any HALO_* variable from the environment.

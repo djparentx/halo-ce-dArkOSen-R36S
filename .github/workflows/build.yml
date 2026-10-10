@@ -81,7 +81,6 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          install -m 755 port/darkosen/Halo.sh dist/Halo.sh
           name="halo-ce-dArkOSen-${GITHUB_SHA::8}"
           tar -C dist -czf "$name.tar.gz" .
           echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"

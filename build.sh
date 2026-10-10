@@ -161,8 +161,9 @@ SDL2_INCLUDE=$SDL2_INCLUDE SYSROOT_LIB=$SYSROOT_LIB ANDROID_NDK=$ANDROID_NDK GLI
 
 # ---------- dist: what goes on the handheld
 
-install -m 755 build/knulli/halo build/knulli/halo_guest.elf port/darkosen/Halo.sh port/darkosen/halo_extract.py \
+install -m 755 build/knulli/halo build/knulli/halo_guest.elf port/darkosen/halo_extract.py \
 	port/darkosen/halo_screen.py port/darkosen/sdl_mapping.py "$DIST/"
+install -m 755 port/darkosen/Halo.sh "$DIST/Halo - Combat Evolved.sh"
 install -m 644 port/darkosen/config.default.toml port/assets/network/brokers.txt "$DIST/"
 echo "== done: $DIST"
 ls -l "$DIST"
