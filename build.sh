@@ -21,6 +21,10 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 UPSTREAM_URL=${UPSTREAM_URL:-https://github.com/cybersecurity/halo-ce-universal.git}
 UPSTREAM_COMMIT=$(tr -d '[:space:]' < "$HERE/UPSTREAM_COMMIT")
 PATCH=$HERE/patches/halo-ce-universal-knulli.patch
+# the Knulli port's patch, then dArkOSen's (patches/darkosen-*.patch), in order
+shopt -s nullglob
+PATCHES=("$PATCH" "$HERE"/patches/darkosen-*.patch)
+shopt -u nullglob
 SDL2_TAG=release-2.30.12
 SDL2_ARCHIVE=https://github.com/libsdl-org/SDL/archive/refs/tags/$SDL2_TAG.tar.gz
 GUEST_CC=${GUEST_CC:-clang-22}
@@ -85,25 +89,34 @@ if ! git -C "$SRC" cat-file -e "$UPSTREAM_COMMIT^{commit}" 2> /dev/null; then
 fi
 
 # The tree is reset only when it is not already the pinned commit with the
-# patch applied, so that unchanged files keep their times and a rebuild is
+# patches applied, so that unchanged files keep their times and a rebuild is
 # incremental. git clean without -x keeps the ignored build/ and build.ninja.
-# The "index" lines are left out of the comparison: their abbreviated object
-# names are longer in a full clone than in this shallow one.
+# What was applied is recorded once it is: the patches' sum and the tree's.
+patches_sum() {
+	cat "${PATCHES[@]}" | sha256sum | cut -d ' ' -f 1
+}
+tree_sum() {
+	git -C "$SRC" diff HEAD | sha256sum | cut -d ' ' -f 1
+}
 tree_is_patched() {
 	[ "$(git -C "$SRC" rev-parse HEAD 2> /dev/null || true)" = "$UPSTREAM_COMMIT" ] &&
-		cmp -s <(git -C "$SRC" diff HEAD | grep -v '^index ') <(grep -v '^index ' "$PATCH")
+		[ "$(cat "$WORK/patches.sum" 2> /dev/null || true)" = "$(patches_sum) $(tree_sum)" ]
 }
 if ! tree_is_patched; then
-	echo "== checking out $UPSTREAM_COMMIT and applying $(basename "$PATCH")"
+	echo "== checking out $UPSTREAM_COMMIT and applying ${#PATCHES[@]} patches"
 	git -C "$SRC" checkout -q --force --detach "$UPSTREAM_COMMIT"
 	git -C "$SRC" reset -q --hard
 	git -C "$SRC" clean -q -fd
-	git -C "$SRC" apply "$PATCH"
-	# the files the patch creates as intent-to-add, so that git diff
-	# (tree_is_patched) sees them (git apply --intent-to-add drops the rest of
-	# the index in git 2.43)
-	git -C "$SRC" apply --summary "$PATCH" | awk '$1 == "create" { print $4 }' |
-		xargs -r git -C "$SRC" add -N --
+	for patch in "${PATCHES[@]}"; do
+		echo "   $(basename "$patch")"
+		git -C "$SRC" apply "$patch"
+		# the files the patch creates as intent-to-add, so that git diff
+		# (tree_sum) sees them (git apply --intent-to-add drops the rest of
+		# the index in git 2.43)
+		git -C "$SRC" apply --summary "$patch" | awk '$1 == "create" { print $4 }' |
+			xargs -r git -C "$SRC" add -N --
+	done
+	echo "$(patches_sum) $(tree_sum)" > "$WORK/patches.sum"
 fi
 rm -rf "$SRC/port/darkosen"
 cp -a "$HERE/port/darkosen" "$SRC/port/darkosen"
@@ -115,7 +128,7 @@ rm -rf "$SRC/port/darkosen/__pycache__"
 # path. The host's objects start afresh whenever the patch or port/darkosen
 # changes.
 stamp=$({
-	cat "$PATCH"
+	cat "${PATCHES[@]}"
 	(cd "$HERE/port/darkosen" && find . -type f ! -path '*/__pycache__/*' -print0 | sort -z | xargs -0 sha256sum)
 } | sha256sum | cut -d ' ' -f 1)
 if [ "$(cat "$WORK/source.stamp" 2> /dev/null || true)" != "$stamp" ]; then
