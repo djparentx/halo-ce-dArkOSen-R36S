@@ -1,0 +1,100 @@
+name: build
+
+on:
+  push:
+    branches: [dArkOSen_R36]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  NDK_VERSION: r28c
+  CLANG_VERSION: "22"
+  DEBIAN_MIRROR: https://deb.debian.org/debian
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build git curl xz-utils unzip tar dpkg python3 \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            lsb-release wget gnupg software-properties-common
+
+      - name: Install clang 22 (apt.llvm.org)
+        run: |
+          wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"
+          chmod +x "$RUNNER_TEMP/llvm.sh"
+          sudo "$RUNNER_TEMP/llvm.sh" "$CLANG_VERSION"
+          clang-"$CLANG_VERSION" --version
+          clang-"$CLANG_VERSION" -print-targets | grep -q aarch64_32
+
+      - name: Cache Android NDK
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ndk
+          key: android-ndk-${{ env.NDK_VERSION }}-linux
+
+      - name: Download Android NDK
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/ndk"
+          curl -fsSL -o "$RUNNER_TEMP/ndk.zip" \
+            "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+          unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP/ndk"
+
+      - name: Set ANDROID_NDK
+        run: |
+          echo "ANDROID_NDK=$RUNNER_TEMP/ndk/android-ndk-${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Fetch link-time SDL2 (Debian trixie arm64, same as dArkOSen)
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/sdl2-deb"
+          lib="$RUNNER_TEMP/sysroot-lib"
+          mkdir -p "$work/x" "$lib"
+          curl -fsSL "$DEBIAN_MIRROR/dists/trixie/main/binary-arm64/Packages.xz" | xz -dc > "$work/Packages"
+          filename=$(awk '/^Package: libsdl2-2.0-0$/ {f=1; next} f && /^Filename: / {print $2; exit} /^$/ {f=0}' "$work/Packages")
+          sum=$(awk '/^Package: libsdl2-2.0-0$/ {f=1; next} f && /^SHA256: / {print $2; exit} /^$/ {f=0}' "$work/Packages")
+          [ -n "$filename" ] && [ -n "$sum" ] || { echo "libsdl2-2.0-0 not found in Packages"; exit 1; }
+          curl -fsSL -o "$work/sdl2.deb" "$DEBIAN_MIRROR/$filename"
+          echo "$sum  $work/sdl2.deb" | sha256sum -c -
+          dpkg-deb -x "$work/sdl2.deb" "$work/x"
+          cp -a "$work"/x/usr/lib/aarch64-linux-gnu/libSDL2-2.0.so.0* "$lib/"
+          ls -l "$lib"
+          echo "SYSROOT_LIB=$lib" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          GUEST_CC=clang-"$CLANG_VERSION" ./build.sh
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="halo-ce-dArkOSen-${GITHUB_SHA::8}"
+          tar -C dist -czf "$name.tar.gz" .
+          echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"
+          ls -l dist "$name.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: halo-ce-dArkOSen
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARCHIVE }}
