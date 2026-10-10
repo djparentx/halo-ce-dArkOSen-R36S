@@ -15,6 +15,8 @@ import re
 import xml.etree.ElementTree as ElementTree
 
 CONFIGS = [
+    "/etc/emulationstation/es_input.cfg",
+    "/home/ark/.emulationstation/es_input.cfg",
     "/userdata/system/configs/emulationstation/es_input.cfg",
     "/usr/share/emulationstation/es_input.cfg",
 ]
