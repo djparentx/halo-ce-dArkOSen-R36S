@@ -28,6 +28,8 @@ NAMES = {
     "l2": "lefttrigger", "r2": "righttrigger", "l3": "leftstick", "r3": "rightstick",
     "up": "dpup", "down": "dpdown", "left": "dpleft", "right": "dpright",
     "joystick1left": "leftx", "joystick1up": "lefty", "joystick2left": "rightx", "joystick2up": "righty",
+    "leftanalogleft": "leftx", "leftanalogup": "lefty", "rightanalogleft": "rightx", "rightanalogup": "righty",
+    "leftthumb": "leftstick", "rightthumb": "rightstick", "lefttrigger": "lefttrigger", "righttrigger": "righttrigger",
 }
 
 
