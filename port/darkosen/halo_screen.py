@@ -12,6 +12,7 @@ through the Screen class. The font is
 font8x8 by Daniel Hepper, after IBM's VGA font (both public domain).
 """
 
+import array
 import fcntl
 import glob
 import os
@@ -73,6 +74,21 @@ class Screen:
         self.stride = line_length
         self.origin = yoffset * line_length + xoffset * self.size
         self.fields, self.bits = fields, bits
+
+        # a panel taller than wide is mounted sideways: drawn on a landscape
+        # canvas, turned onto it; HALO_SCREEN_ROTATE (0, 90 or 270) overrides
+        self.rotate = 270 if self.height > self.width else 0
+        setting = os.environ.get("HALO_SCREEN_ROTATE", "")
+        if setting in ("0", "90", "270"):
+            self.rotate = int(setting)
+        if self.size not in (2, 4):
+            self.rotate = 0
+        if self.rotate:
+            self.typecode = next(code for code in "HIL" if array.array(code).itemsize == self.size)
+            self.panel_height = self.height
+            self.width, self.height = self.height, self.width
+            self.canvas = array.array(self.typecode, bytes(self.width * self.height * self.size))
+
         try:
             fcntl.ioctl(self.device, FBIOBLANK, 0)
         except OSError:
@@ -147,7 +163,21 @@ class Screen:
             self.write(self.bar[0], self.bar_rows(fraction))
 
     def write(self, start, rows):
-        """rows of pixels, from row start of the visible page down"""
+        """rows of pixels, from row start of the visible page down (on a
+        turned panel, rows of the landscape canvas, turned onto the panel)"""
+        if self.rotate:
+            end = start + len(rows)
+            width = self.width
+            self.canvas[start * width:end * width] = array.array(self.typecode, b"".join(rows))
+            for line in range(self.panel_height):
+                column = width - 1 - line if self.rotate == 270 else line
+                segment = self.canvas[column + start * width:column + end * width:width]
+                first = start
+                if self.rotate == 90:
+                    segment.reverse()
+                    first = self.height - end
+                os.pwrite(self.device, segment.tobytes(), self.origin + line * self.stride + first * self.size)
+            return
         if self.stride == self.width * self.size:
             os.pwrite(self.device, b"".join(rows), self.origin + start * self.stride)
         else:
