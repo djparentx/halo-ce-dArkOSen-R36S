@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds Halo: Combat Evolved for Knulli on the Allwinner H700 handhelds
 # (Anbernic RG35XX H and its family) from the upstream decompilation, this
-# repository's patch and port/knulli. The result is in dist/. Refer to
+# repository's patch and port/darkosen. The result is in dist/. Refer to
 # README.md, "Build from source".
 #
 #   ANDROID_NDK=/path/to/android-ndk-r28c SYSROOT_LIB=/path/to/device-libs ./build.sh
@@ -105,18 +105,18 @@ if ! tree_is_patched; then
 	git -C "$SRC" apply --summary "$PATCH" | awk '$1 == "create" { print $4 }' |
 		xargs -r git -C "$SRC" add -N --
 fi
-rm -rf "$SRC/port/knulli"
-cp -a "$HERE/port/knulli" "$SRC/port/knulli"
-rm -rf "$SRC/port/knulli/__pycache__"
+rm -rf "$SRC/port/darkosen"
+cp -a "$HERE/port/darkosen" "$SRC/port/darkosen"
+rm -rf "$SRC/port/darkosen/__pycache__"
 
-# port/knulli/build.sh rebuilds an object when its source, a header it
+# port/darkosen/build.sh rebuilds an object when its source, a header it
 # included (its .d file), the script or the compiler's options change; not
 # for a new header that would now be found before another on the include
-# path. The host's objects start afresh whenever the patch or port/knulli
+# path. The host's objects start afresh whenever the patch or port/darkosen
 # changes.
 stamp=$({
 	cat "$PATCH"
-	(cd "$HERE/port/knulli" && find . -type f ! -path '*/__pycache__/*' -print0 | sort -z | xargs -0 sha256sum)
+	(cd "$HERE/port/darkosen" && find . -type f ! -path '*/__pycache__/*' -print0 | sort -z | xargs -0 sha256sum)
 } | sha256sum | cut -d ' ' -f 1)
 if [ "$(cat "$WORK/source.stamp" 2> /dev/null || true)" != "$stamp" ]; then
 	rm -rf "$SRC/build/knulli/obj"
@@ -140,7 +140,7 @@ fi
 # on Knulli); downloaded once, again only when the packages change
 
 GLIBC_SYSROOT=$WORK/glibc-2.31
-sh "$SRC/port/knulli/glibc_sysroot.sh" "$GLIBC_SYSROOT"
+sh "$SRC/port/darkosen/glibc_sysroot.sh" "$GLIBC_SYSROOT"
 
 # ---------- build
 
@@ -157,12 +157,12 @@ grep -q 'halo_guest\.elf' build.ninja ||
 
 echo "== building (this takes a while the first time)"
 SDL2_INCLUDE=$SDL2_INCLUDE SYSROOT_LIB=$SYSROOT_LIB ANDROID_NDK=$ANDROID_NDK GLIBC_SYSROOT=$GLIBC_SYSROOT \
-	CC=$HOST_CC JOBS=$JOBS sh port/knulli/build.sh
+	CC=$HOST_CC JOBS=$JOBS sh port/darkosen/build.sh
 
 # ---------- dist: what goes on the handheld
 
-install -m 755 build/knulli/halo build/knulli/halo_guest.elf port/knulli/Halo.sh port/knulli/halo_extract.py \
-	port/knulli/halo_screen.py port/knulli/sdl_mapping.py "$DIST/"
-install -m 644 port/knulli/config.default.toml port/assets/network/brokers.txt "$DIST/"
+install -m 755 build/knulli/halo build/knulli/halo_guest.elf port/darkosen/Halo.sh port/darkosen/halo_extract.py \
+	port/darkosen/halo_screen.py port/darkosen/sdl_mapping.py "$DIST/"
+install -m 644 port/darkosen/config.default.toml port/assets/network/brokers.txt "$DIST/"
 echo "== done: $DIST"
 ls -l "$DIST"

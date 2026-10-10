@@ -1,166 +1,110 @@
 #!/bin/bash
-# Halo: Combat Evolved, the native port of the decompilation, for Knulli
-# handhelds with the Allwinner H700 (Anbernic RG35XX H and its family).
-# Refer to port/knulli/README.md.
-#
-# This script goes in /userdata/roms/ports, the game in the halo folder
-# beside it. Put an Xbox disc image of the game (.iso) in that folder, or in
-# ports itself: the first start copies its maps folder out (a few minutes,
-# with its progress on the screen), then the image can be deleted. The log
-# of each start is halo/log.txt; the settings are halo/config.toml.
-#
-# Hold the hotkey (MENU or SELECT) and push START to quit.
+# port/darkosen/Halo.sh -> /roms2/ports/Halo.sh
+# Halo: Combat Evolved for dArkOSen (RK3326, Mali-G31).
+# The game folder is ./halo next to this script (/roms2/ports/halo).
+# First-build launcher: safe defaults, override any HALO_* variable from the environment.
 
-GAMEDIR="$(cd "$(dirname "$0")/halo" && pwd)"
+GAMEDIR="$(cd "$(dirname "$0")/halo" && pwd)" || exit 1
 cd "$GAMEDIR" || exit 1
-# one start at a time (or development run, tools/device/run.sh), before the
-# log starts again: another meanwhile would take the raised clocks for the
-# ones to put back. The game inherits the lock, which is held as long as it
-# runs, even past this script. (flock, or Python's where it is missing:
-# without either, no start.)
-exec 9> /var/run/halo-lock
-if ! { flock -n 9 || python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)'; } 2> /dev/null; then
+
+LOCK=/dev/shm/halo-lock
+SAVED=/dev/shm/halo-clocks
+CPU=/sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+GPU=""
+for g in /sys/class/devfreq/*.gpu; do
+	[ -d "$g" ] && GPU="$g" && break
+done
+
+# one start at a time; fd 9 is inherited by the game, so the lock lives as long as it runs
+exec 9> "$LOCK" || { echo "$(date): cannot open $LOCK" >> "$GAMEDIR/log.txt"; exit 1; }
+if ! flock -n 9; then
 	echo "$(date): Halo is running already; this start was refused" >> "$GAMEDIR/log.txt"
 	exit 1
 fi
 exec > "$GAMEDIR/log.txt" 2>&1
-echo "Halo for Knulli, $(date)"
-# (stopped between the steps below: through the EXIT handler)
-trap 'exit 143' TERM INT HUP
 
-# a step run with the signals the launcher gets passed on to it, to its end:
-# a helper must not go on alone (holding the lock) when the launcher is
-# stopped, and one asked to stop that has not ten seconds later is killed (a
-# hung game must not keep the clocks and the lock). Its exit status; after a
-# step the launcher was asked to stop in, the launcher stops.
-stop() {
-	stopping=1
-	[ -n "$child" ] || return 0
-	kill -TERM "$child" 2>/dev/null
-	[ -n "$watchdog" ] || { (exec 9>&-; sleep 10; kill -KILL "$child" 2>/dev/null) & watchdog=$!; }
-}
-supervised() {
-	local status
+kv() { printf '%-18s %s\n' "$1" "$2"; }
 
-	child="" watchdog="" stopping=""
-	trap stop TERM INT HUP
-	"$@" &
-	child=$!
-	# (a stop that came as the step started)
-	[ -z "$stopping" ] || stop
-	# (until the step itself has ended: a signal ends a wait early)
-	while :; do
-		wait "$child"
-		status=$?
-		kill -0 "$child" 2>/dev/null || break
-	done
-	trap 'exit 143' TERM INT HUP
-	[ -z "$watchdog" ] || kill "$watchdog" 2>/dev/null
-	if [ -n "$stopping" ]; then
-		echo "stopped (exit status $status)"
-		exit 143
-	fi
-	return "$status"
+# root writes for sysfs: sudo without a password, or nothing
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+	if sudo -n true 2> /dev/null; then SUDO="sudo -n"; else SUDO="none"; fi
+fi
+put() {
+	[ "$SUDO" = none ] && return 1
+	echo "$1" | $SUDO tee "$2" > /dev/null 2>&1
 }
 
-# the fastest clocks while the maps are copied and the game runs: the CPU at
-# its top frequency, the GPU held at its top step (the governor otherwise
-# keeps it at the lowest). What they were is kept in /var/run (gone at a
-# reboot), so that a start after a launcher that was killed outright puts
-# them back first.
-cpu=/sys/devices/system/cpu/cpufreq/policy0/scaling_governor
-gpu=/sys/class/devfreq/gpu
-saved=/var/run/halo-clocks
 restore() {
-	if [ -f "$saved" ]; then
-		read -r cpu_governor gpu_minimum < "$saved"
-		[ -n "$cpu_governor" ] && echo "$cpu_governor" > "$cpu" 2>/dev/null
-		[ -n "$gpu_minimum" ] && echo "$gpu_minimum" > "$gpu/min_freq" 2>/dev/null
-		rm -f "$saved"
+	if [ -f "$SAVED" ]; then
+		read -r saved_governor saved_gpu_min < "$SAVED"
+		[ -n "$saved_governor" ] && [ "$saved_governor" != none ] && put "$saved_governor" "$CPU"
+		[ -n "$saved_gpu_min" ] && [ "$saved_gpu_min" != none ] && [ -n "$GPU" ] && put "$saved_gpu_min" "$GPU/min_freq"
+		rm -f "$SAVED"
 	fi
-	rm -f /var/run/battery-saver/halo.pause
 }
 restore
-echo "$(cat "$cpu" 2>/dev/null) $(cat "$gpu/min_freq" 2>/dev/null)" > "$saved"
+echo "$(cat "$CPU" 2> /dev/null || echo none) $(cat "$GPU/min_freq" 2> /dev/null || echo none)" > "$SAVED"
 trap restore EXIT
-echo performance > "$cpu" 2>/dev/null
-tr ' ' '\n' < "$gpu/available_frequencies" 2>/dev/null | sort -n | tail -n 1 > "$gpu/min_freq" 2>/dev/null
 
-# the battery saver must not dim or suspend the handheld meanwhile
-mkdir -p /var/run/battery-saver && touch /var/run/battery-saver/halo.pause
-
-# the maps: copied out of a disc image in this folder, or else in ports
-if [ ! -s maps/ui.map ]; then
-	shopt -s nullglob
-	images=({.,..}/*.{iso,ISO,xiso,XISO})
-	shopt -u nullglob
-	if [ "${#images[@]}" -eq 0 ]; then
-		echo "no maps folder and no disc image (.iso) in $GAMEDIR"
-		supervised python3 halo_screen.py wait 60 "Halo needs your disc" "Copy the disc image of Halo: Combat Evolved for the Xbox (an .iso file) into roms/ports/halo on the SD card, then start Halo again.
-
-Press a button to go back."
-		exit 1
-	fi
-	[ "${#images[@]}" -eq 1 ] || echo "${#images[@]} disc images: the first is used"
-	echo "copying the maps folder out of ${images[0]}"
-	supervised python3 halo_extract.py --screen "${images[0]}" "$GAMEDIR" || exit 1
+put performance "$CPU"
+if [ -n "$GPU" ]; then
+	top=$(tr ' ' '\n' < "$GPU/available_frequencies" 2> /dev/null | sort -n | tail -n 1)
+	[ -n "$top" ] && put "$top" "$GPU/min_freq"
 fi
 
-# the settings for this handheld, the first time (config.default.toml's;
-# config.toml keeps them, with the others' defaults, which the game writes):
-# written whole, or no start (the game would write its own defaults instead,
-# for good); nor with something else of that name, a folder say, in the way
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
+# safe first run: turn these on one at a time (HALO_GL_THREAD=1 ./Halo.sh)
+export HALO_GL_THREAD="${HALO_GL_THREAD:-0}"
+export HALO_ASYNC_PROGRAMS="${HALO_ASYNC_PROGRAMS:-0}"
+
+echo "Halo for dArkOSen, $(date)"
+kv "device"           "$(cat /home/ark/.config/.DEVICE 2> /dev/null)"
+kv "kernel"           "$(uname -sr)"
+kv "sdl2"             "$(readlink -f /usr/lib/aarch64-linux-gnu/libSDL2-2.0.so.0 2> /dev/null)"
+kv "mem available"    "$(grep MemAvailable /proc/meminfo | tr -s ' ' | cut -d' ' -f2-)"
+kv "fb0 modes"        "$(cat /sys/class/graphics/fb0/modes 2> /dev/null)"
+kv "root helper"      "${SUDO:-root}"
+kv "cpu governor"     "$(cat "$CPU" 2> /dev/null)"
+kv "gpu devfreq"      "${GPU:-none}"
+kv "gpu min/cur"      "$(cat "$GPU/min_freq" 2> /dev/null) / $(cat "$GPU/cur_freq" 2> /dev/null)"
+kv "SDL_VIDEODRIVER"  "$SDL_VIDEODRIVER"
+kv "SDL_AUDIODRIVER"  "$SDL_AUDIODRIVER"
+kv "HALO_GL_THREAD"   "$HALO_GL_THREAD"
+kv "HALO_ASYNC_PROGS" "$HALO_ASYNC_PROGRAMS"
+
+if [ ! -s maps/ui.map ]; then
+	echo "no maps/ui.map in $GAMEDIR"
+	exit 1
+fi
+
+# first start only: settings for this handheld (the game keeps and extends config.toml)
 if [ ! -f config.toml ]; then
-	if [ -e config.toml ] || [ -L config.toml ] ||
-		! rm -rf config.toml.new || ! cp config.default.toml config.toml.new ||
-		! mv -f config.toml.new config.toml; then
+	if ! { cp config.default.toml config.toml.new &&
+		sed -i 's/^render_scale[[:space:]]*=.*/render_scale = 0.5/' config.toml.new &&
+		mv -f config.toml.new config.toml; }; then
 		rm -f config.toml.new
 		echo "cannot write config.toml"
-		supervised python3 halo_screen.py wait 60 "Halo could not start" "Halo could not write its settings, roms/ports/halo/config.toml: the SD card may be full, or a folder has that name.
-
-Press a button to go back."
 		exit 1
 	fi
 fi
 
-# internet play on, once for an install whose settings the launcher wrote
-# with it off (before co-op and the server browser); the player's choice
-# after that stays (save/online-on records that it was done)
-if [ ! -e save/online-on ]; then
-	sed -i '/^[[:space:]]*\[network\]/,/^[[:space:]]*\[/ s/^\([[:space:]]*online[[:space:]]*=[[:space:]]*\)false/\1true/' config.toml &&
-		mkdir -p save && : > save/online-on
+# the handheld's own controls, from EmulationStation's config
+if [ -f sdl_mapping.py ] && command -v python3 > /dev/null; then
+	SDL_GAMECONTROLLERCONFIG="$(python3 sdl_mapping.py)"
+	export SDL_GAMECONTROLLERCONFIG
 fi
 
-# the handheld's own controls (SDL2 would take them for another pad)
-SDL_GAMECONTROLLERCONFIG="$(python3 sdl_mapping.py)"
-export SDL_GAMECONTROLLERCONFIG
-
-# the first start: the game sets up its cache (save/z) before its first
-# frame, about a minute with the screen black (nothing drawn before the game
-# stays up as its GPU driver starts): said first
-if [ ! -d save/z ]; then
-	supervised python3 halo_screen.py wait 10 "Starting Halo" "The first start takes about a minute more, with a black screen, while the game sets up its cache. Later starts are quick.
-
-Press a button to go on."
-fi
-
-supervised ./halo
-status=$?
+./halo &
+child=$!
+trap 'kill -TERM "$child" 2> /dev/null' TERM INT HUP
+while :; do
+	wait "$child"
+	status=$?
+	kill -0 "$child" 2> /dev/null || break
+done
+trap - TERM INT HUP
 echo "exit status $status"
-# (0: quit from the game; 130 and 143: stopped by a signal; 137: killed,
-# most likely by the kernel when memory ran out, as this script's own kill
-# comes only after a stop, which ends it above)
-case "$status" in
-0 | 130 | 143) ;;
-137)
-	supervised python3 halo_screen.py wait 30 "Halo was stopped" "The system stopped Halo (exit status 137), most likely because the handheld ran out of memory. In roms/ports/halo/config.toml, set high_res_text = false and high_res_hud = false: the high-res text alone takes about 260 MB.
-
-Press a button to go back."
-	;;
-*)
-	supervised python3 halo_screen.py wait 30 "Halo stopped" "Halo stopped unexpectedly (exit status $status). What happened is in roms/ports/halo/log.txt.
-
-Press a button to go back."
-	;;
-esac
+[ "$status" -eq 137 ] && echo "killed, most likely out of memory: set high_res_text = false and high_res_hud = false in config.toml"
 exit "$status"

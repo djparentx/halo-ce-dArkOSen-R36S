@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the Knulli port (port/knulli/README.md) into build/knulli:
+# Builds the Knulli port (port/darkosen/README.md) into build/knulli:
 #   halo            the aarch64 glibc host (the loader, SDL2, OpenGL ES)
 #   halo_guest.elf  the game, the Android port's guest image
 #
@@ -7,7 +7,7 @@
 # aarch64-linux-gnu cross compiler, SDL2 headers (SDL2_INCLUDE), the device's
 # SDL2 to link against (SYSROOT_LIB: libSDL2-2.0.so.0, from /usr/lib of the
 # device) and the sysroot to build against (GLIBC_SYSROOT: glibc 2.31, and
-# libglvnd's EGL and OpenGL ES, made by port/knulli/glibc_sysroot.sh). Built
+# libglvnd's EGL and OpenGL ES, made by port/darkosen/glibc_sysroot.sh). Built
 # on glibc 2.31, and linked against EGL and OpenGL ES by their usual names
 # (libEGL.so.1, libGLESv2.so.2, which every system's SDL2 opens; on Knulli and
 # muOS they load the Mali driver), the host runs on the other systems for
@@ -26,7 +26,7 @@ folder() {
 SDL2_INCLUDE=$(folder "${SDL2_INCLUDE:?the folder that holds SDL2/SDL.h}")
 SYSROOT_LIB=$(folder "${SYSROOT_LIB:?the device libraries}")
 NDK=$(folder "${ANDROID_NDK:?the Android NDK (for the OpenGL ES and EGL headers)}")
-GLIBC=$(folder "${GLIBC_SYSROOT:?the glibc 2.31 sysroot (port/knulli/glibc_sysroot.sh)}")
+GLIBC=$(folder "${GLIBC_SYSROOT:?the glibc 2.31 sysroot (port/darkosen/glibc_sysroot.sh)}")
 cd "$(dirname "$0")/../.."
 ROOT=$(folder .)
 CC=${CC:-aarch64-linux-gnu-gcc}
@@ -56,7 +56,7 @@ CFLAGS="-O2 -g -mcpu=cortex-a53 -fPIC -Wall -Wno-unused-function -D_GNU_SOURCE -
 # by what they are, not by where they are on this computer; the OpenGL ES
 # headers are found through build/knulli/gl_include, in the tree)
 CFLAGS="$CFLAGS -ffile-prefix-map=$ROOT=. -ffile-prefix-map=$SDL2_INCLUDE=sdl2 -ffile-prefix-map=$GLIBC=glibc $LIBC_INCLUDES"
-INCLUDES="-Iport/knulli/compat -Iport/knulli/host -Iport/android/include -Iport/android/host -Iport/linux/src
+INCLUDES="-Iport/darkosen/compat -Iport/darkosen/host -Iport/android/include -Iport/android/host -Iport/linux/src
 	-Iport/third_party/tomlc17 -I$OUT/gl_include -I$SDL2_INCLUDE"
 MINIUPNPC="-Iport/third_party/miniupnpc/include -Iport/third_party/miniupnpc/src -DMINIUPNP_STATICLIB
 	-DMINIUPNPC_SET_SOCKET_TIMEOUT -DMINIUPNPC_GET_SRC_ADDR -D_BSD_SOURCE -D_DEFAULT_SOURCE -w"
@@ -97,19 +97,19 @@ compile() {
 for source in host_debug host_gl host_loader host_memory host_syscall host_thread; do
 	compile port/android/host/$source.c
 done
-compile port/knulli/host/host_main.c
-compile port/knulli/host/host_sdl2.c
-compile port/knulli/host/host_profile.c
-compile port/knulli/host/host_gl_timing.c
-compile port/knulli/host/host_gl_timing.S
+compile port/darkosen/host/host_main.c
+compile port/darkosen/host/host_sdl2.c
+compile port/darkosen/host/host_profile.c
+compile port/darkosen/host/host_gl_timing.c
+compile port/darkosen/host/host_gl_timing.S
 # the GL thread's recording functions, from the functions the guest imports
-python3 port/knulli/glthread_gen.py build/android/guest/gen/gl_imports.list "$KHRONOS/GLES3/gl32.h" \
+python3 port/darkosen/glthread_gen.py build/android/guest/gen/gl_imports.list "$KHRONOS/GLES3/gl32.h" \
 	"$OUT/host_glthread_gen.c.new"
 cmp -s "$OUT/host_glthread_gen.c.new" "$OUT/host_glthread_gen.c" || mv "$OUT/host_glthread_gen.c.new" "$OUT/host_glthread_gen.c"
 rm -f "$OUT/host_glthread_gen.c.new"
-compile port/knulli/host/host_glthread.c
+compile port/darkosen/host/host_glthread.c
 compile "$OUT/host_glthread_gen.c"
-compile port/knulli/host/host_sdl3_events.c -Ibuild/android/third_party/SDL3/include
+compile port/darkosen/host/host_sdl3_events.c -Ibuild/android/third_party/SDL3/include
 compile port/linux/src/posix_files.c
 compile port/linux/src/posix_net.c
 # shellcheck disable=SC2086
