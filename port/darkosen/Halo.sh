@@ -35,29 +35,44 @@ put() {
 	echo "$1" | $SUDO tee "$2" > /dev/null 2>&1
 }
 
+# the GPU is held at GPU_MAX_HZ or the highest step under it: 600 MHz hangs
+# the GPU under load on these boards (kernel hard-stop and reset, ~8.7 s)
+GPU_MAX_HZ="${HALO_GPU_MAX_HZ:-520000000}"
+
 restore() {
 	if [ -f "$SAVED" ]; then
-		read -r saved_governor saved_gpu_min < "$SAVED"
+		read -r saved_governor saved_gpu_min saved_gpu_max < "$SAVED"
 		[ -n "$saved_governor" ] && [ "$saved_governor" != none ] && put "$saved_governor" "$CPU"
-		[ -n "$saved_gpu_min" ] && [ "$saved_gpu_min" != none ] && [ -n "$GPU" ] && put "$saved_gpu_min" "$GPU/min_freq"
+		if [ -n "$GPU" ]; then
+			low=$(tr ' ' '\n' < "$GPU/available_frequencies" 2> /dev/null | grep . | sort -n | head -n 1)
+			[ -n "$low" ] && put "$low" "$GPU/min_freq"
+			[ -n "$saved_gpu_max" ] && [ "$saved_gpu_max" != none ] && put "$saved_gpu_max" "$GPU/max_freq"
+			[ -n "$saved_gpu_min" ] && [ "$saved_gpu_min" != none ] && put "$saved_gpu_min" "$GPU/min_freq"
+		fi
 		rm -f "$SAVED"
 	fi
 }
 restore
-echo "$(cat "$CPU" 2> /dev/null || echo none) $(cat "$GPU/min_freq" 2> /dev/null || echo none)" > "$SAVED"
+echo "$(cat "$CPU" 2> /dev/null || echo none) $(cat "$GPU/min_freq" 2> /dev/null || echo none) $(cat "$GPU/max_freq" 2> /dev/null || echo none)" > "$SAVED"
 trap restore EXIT
 
 put performance "$CPU"
 if [ -n "$GPU" ]; then
-	top=$(tr ' ' '\n' < "$GPU/available_frequencies" 2> /dev/null | sort -n | tail -n 1)
-	[ -n "$top" ] && put "$top" "$GPU/min_freq"
+	steps=$(tr ' ' '\n' < "$GPU/available_frequencies" 2> /dev/null | grep . | sort -n)
+	target=$(echo "$steps" | awk -v max="$GPU_MAX_HZ" '$1 <= max { t = $1 } END { print t }')
+	[ -z "$target" ] && target=$(echo "$steps" | head -n 1)
+	if [ -n "$target" ]; then
+		put "$target" "$GPU/min_freq"
+		put "$target" "$GPU/max_freq"
+		put "$target" "$GPU/min_freq"
+	fi
 fi
 
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
 # safe first run: turn these on one at a time (HALO_GL_THREAD=1 ./Halo.sh)
-export HALO_GL_THREAD="${HALO_GL_THREAD:-0}"
-export HALO_ASYNC_PROGRAMS="${HALO_ASYNC_PROGRAMS:-0}"
+export HALO_GL_THREAD="${HALO_GL_THREAD:-1}"
+export HALO_ASYNC_PROGRAMS="${HALO_ASYNC_PROGRAMS:-1}"
 
 echo "Halo for dArkOSen, $(date)"
 kv "device"           "$(cat /home/ark/.config/.DEVICE 2> /dev/null)"
@@ -68,7 +83,7 @@ kv "fb0 modes"        "$(cat /sys/class/graphics/fb0/modes 2> /dev/null)"
 kv "root helper"      "${SUDO:-root}"
 kv "cpu governor"     "$(cat "$CPU" 2> /dev/null)"
 kv "gpu devfreq"      "${GPU:-none}"
-kv "gpu min/cur"      "$(cat "$GPU/min_freq" 2> /dev/null) / $(cat "$GPU/cur_freq" 2> /dev/null)"
+kv "gpu min/max/cur"  "$(cat "$GPU/min_freq" 2> /dev/null) / $(cat "$GPU/max_freq" 2> /dev/null) / $(cat "$GPU/cur_freq" 2> /dev/null)"
 kv "SDL_VIDEODRIVER"  "$SDL_VIDEODRIVER"
 kv "SDL_AUDIODRIVER"  "$SDL_AUDIODRIVER"
 kv "HALO_GL_THREAD"   "$HALO_GL_THREAD"
