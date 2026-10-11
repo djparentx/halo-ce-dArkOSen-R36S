@@ -1157,8 +1157,23 @@ index fb8f6484..b87c382b 100644
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/button_bar" y="414"/>
  	</widget>
  	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+diff --git a/port/assets/network/brokers.txt b/port/assets/network/brokers.txt
+index f583f8d7..e2966d2a 100644
+--- a/port/assets/network/brokers.txt
++++ b/port/assets/network/brokers.txt
+@@ -3,7 +3,9 @@
+ # them. The game uses every one at once (up to 4), so any one working is
+ # enough. One host:port on each line; "#" starts a comment.
+ # (The game reads this file beside config.toml: network.brokers_file. An
+-# update replaces it; keep a list of your own under another name.)
++# update replaces it; keep a list of your own under another name. The web
++# build reaches the last three over their secure WebSockets:
++# port/linux/src/p2p_signal.c.)
+ opence.milenko.org:1883
+ broker.emqx.io:1883
+ broker.hivemq.com:1883
 diff --git a/port/linux/NETCODE.md b/port/linux/NETCODE.md
-index 21f12c83..bf07384c 100644
+index 21f12c83..2305ae60 100644
 --- a/port/linux/NETCODE.md
 +++ b/port/linux/NETCODE.md
 @@ -52,14 +52,13 @@ with ideas from VALORANT's netcode articles, keeping the 30 Hz tick:
@@ -1214,6 +1229,39 @@ index 21f12c83..bf07384c 100644
     - A client's own projectiles respond to what they hit as the game has
       them: the host's shields and health, which the client has, say
       whether the shield or the body took the hit, and how much is left of
+@@ -453,6 +457,14 @@ What reaches the other machines, and how, decides how the game feels over
+ a real network as much as the model does (compared with Quake III, Source,
+ Unity's Netcode for Entities, lightyear, netfox and the Ares source):
+ 
++- **Datagrams carry only what is theirs.** A datagram is known to be a
++  machine's only by the address it came from, which anyone can send one
++  as. So a client takes from a datagram only what the host sends in one: its
++  game's advertisement, its answer to a ping, and the distributed netcode's
++  messages (checked as the host's below); the game's own messages (a player
++  added or removed, the game begun or over, its settings), which the host
++  sends over its connection, are ignored in a datagram
++  (`network_client_message_handler.c`).
+ - **Nothing held back.** The game's connections (the reliable messages:
+   objects made and deleted, the game type's state, hits, pickups) send each
+   write at once (`TCP_NODELAY`, in `xnet.c` for the game's sockets and in
+@@ -550,7 +562,16 @@ shortens the game, to test the next (`host:<map>:<variant>,<variant>...`
+ plays the variants in turn, the next once a game is over, as the host's
+ button on the scores does). `debug.network_latency` and
+ `debug.network_loss` hold back what a machine receives and drop some of its
+-datagrams, to test as over the internet.
++datagrams, to test as over the internet. `debug.network_corrupt` damages
++that share of the datagrams a machine receives at random (bytes changed,
++cut short, stretched to a full datagram, or replaced throughout: `xnet.c`),
++and `debug.network_corrupt_stream` that share of its reads of connections
++(a damaged connection is closed, so a little goes a long way), from
++`debug.network_corrupt_after` seconds after the start (what a host sends its
++own client over the loopback is damaged too, so the game is set up and
++started first), to test that nothing another machine sends can crash the
++game: a host and a client with a third of their datagrams damaged must play
++on, their logs noting what they refused.
+ 
+ The host logs to `debug.txt` when a player on another machine presses the
+ action button where the host has nothing for them to pick up, with where it
 diff --git a/port/linux/game/menu_functions.c b/port/linux/game/menu_functions.c
 index 0c85e5e6..e4616354 100644
 --- a/port/linux/game/menu_functions.c
@@ -1269,6 +1317,77 @@ index 0c85e5e6..e4616354 100644
  	short level = campaign_level_of(map_name);
  	struct widget_instance *widget;
  
+diff --git a/port/linux/game/menu_tags.c b/port/linux/game/menu_tags.c
+index ba9dfac0..d4548bd5 100644
+--- a/port/linux/game/menu_tags.c
++++ b/port/linux/game/menu_tags.c
+@@ -445,7 +445,17 @@ static void *allocate(long size)
+ 		return NULL;
+ 	}
+ 	memset(block, 0, size > 0 ? size : 1);
+-	menu_tags.blocks = realloc(menu_tags.blocks, (menu_tags.block_count + 1) * sizeof(*menu_tags.blocks));
++	{
++		void **blocks = realloc(menu_tags.blocks, (menu_tags.block_count + 1) * sizeof(*menu_tags.blocks));
++
++		if (!blocks)
++		{
++			free(block);
++			build.failed = TRUE;
++			return NULL;
++		}
++		menu_tags.blocks = blocks;
++	}
+ 	menu_tags.blocks[menu_tags.block_count++] = block;
+ 	return block;
+ }
+@@ -1339,7 +1349,9 @@ static void instance_set(struct cache_file_tag_instance *instances, long group_t
+ 	instance->parent_group_tags[0] = NONE;
+ 	instance->parent_group_tags[1] = NONE;
+ 	instance->tag_index = tag_index;
+-	instance->name = copy;
++	/* (the name is read by tag_loaded: of none, when the copy failed, which
++	fails the build) */
++	instance->name = copy ? copy : "";
+ 	instance->base_address = definition;
+ }
+ 
+@@ -1673,6 +1685,8 @@ void menu_tags_loaded(
+ 	build.spinner_tags = malloc((widget_count + 1) * sizeof(long));
+ 	build.bitmap_tags = malloc((menus->bitmap_count + 1) * sizeof(long));
+ 	build.strings_tags = malloc((menus->string_list_count + 1) * sizeof(long));
++	if (!build.widget_tags || !build.text_tags || !build.spinner_tags || !build.bitmap_tags || !build.strings_tags)
++		goto failed;
+ 	for (index = 0; index < widget_count; index++)
+ 	{
+ 		own_lists += (menus->widgets[index].text != NULL) + (menus->widgets[index].strings != NULL);
+diff --git a/port/linux/game/network_actors.c b/port/linux/game/network_actors.c
+index 82e32d3a..89f9740f 100644
+--- a/port/linux/game/network_actors.c
++++ b/port/linux/game/network_actors.c
+@@ -522,7 +522,8 @@ static boolean actor_state_apply(
+ 	SET_FLAG(unit->unit.flags, _unit_super_camouflaged_bit,
+ 		TEST_FLAG(state->flags, _distributed_actor_super_camouflaged_bit));
+ 	unit->unit.active_camouflage = (real)state->active_camouflage / 255.0f;
+-	if (state->team != NO_TEAM)
++	/* (the game's 10 teams, game_allegiance.c) */
++	if (state->team != NO_TEAM && state->team < 10)
+ 		unit->object.owner_team_index = state->team;
+ 	SET_FLAG(unit->unit.flags, _unit_running_blindly_bit,
+ 		TEST_FLAG(state->flags, _distributed_actor_running_blindly_bit));
+diff --git a/port/linux/game/network_coop.c b/port/linux/game/network_coop.c
+index fa2e72c5..d57b0b2e 100644
+--- a/port/linux/game/network_coop.c
++++ b/port/linux/game/network_coop.c
+@@ -1752,7 +1752,8 @@ static void client_apply_attach(
+ 	struct distributed_coop_event const *event)
+ {
+ 	long parent_index = object_find(event->name_index, event->object_index, event->definition_index, _object_mask_all);
+-	long child_index = object_find((short)event->reals[0], event->target, event->tag_index, _object_mask_all);
++	long child_index = object_find((short)PIN(event->reals[0], -1.0f, 32767.0f), event->target, event->tag_index,
++		_object_mask_all);
+ 	long ancestor_index;
+ 
+ 	if (parent_index == NONE || child_index == NONE || parent_index == child_index)
 diff --git a/port/linux/game/network_damage.c b/port/linux/game/network_damage.c
 index 0842f498..519722c7 100644
 --- a/port/linux/game/network_damage.c
@@ -1321,7 +1440,7 @@ index 0842f498..519722c7 100644
  }
  
 diff --git a/port/linux/game/network_distributed.c b/port/linux/game/network_distributed.c
-index ed6704fd..c4a5e1a0 100644
+index ed6704fd..24cc1048 100644
 --- a/port/linux/game/network_distributed.c
 +++ b/port/linux/game/network_distributed.c
 @@ -163,6 +163,10 @@ enum
@@ -1373,6 +1492,17 @@ index ed6704fd..c4a5e1a0 100644
  	/* spawned on the host: the host's unit is the player's here too, once
  	this machine has it (network_objects.c) */
  	if (state->unit_index == NONE || !network_objects_client_has(state->unit_index) ||
+@@ -2814,8 +2832,8 @@ static void distributed_handle_actions(
+ 		action.control_flags = relayed.control_flags[0];
+ 		action.desired_facing.yaw = distributed_angle_unpack(relayed.yaw, FALSE);
+ 		action.desired_facing.pitch = distributed_angle_unpack(relayed.pitch, TRUE);
+-		action.throttle.i = (real)relayed.throttle_i / 127.0f;
+-		action.throttle.j = (real)relayed.throttle_j / 127.0f;
++		action.throttle.i = PIN((real)relayed.throttle_i / 127.0f, -1.0f, 1.0f);
++		action.throttle.j = PIN((real)relayed.throttle_j / 127.0f, -1.0f, 1.0f);
+ 		action.primary_trigger = (real)relayed.primary_trigger / 255.0f;
+ 		action.desired_weapon_index = relayed.desired_weapon_index;
+ 		action.desired_grenade_index = relayed.desired_grenade_index;
 @@ -3241,6 +3259,7 @@ void network_distributed_new_game(
  	distributed_host_update_number = NONE;
  	for (player_index = 0; player_index < MAXIMUM_TRACKED_PLAYERS; player_index++)
@@ -1420,7 +1550,7 @@ index ed6704fd..c4a5e1a0 100644
  	predictions not taken while its game runs fast) */
  	if (machine_index != NONE)
 diff --git a/port/linux/game/network_objects.c b/port/linux/game/network_objects.c
-index 454cbc01..7fee7a8e 100644
+index 454cbc01..f7de0259 100644
 --- a/port/linux/game/network_objects.c
 +++ b/port/linux/game/network_objects.c
 @@ -116,6 +116,11 @@ enum
@@ -1435,7 +1565,18 @@ index 454cbc01..7fee7a8e 100644
  	/* a client asks for the host's objects again until it has them (a host
  	still loading misses the asking), after this, twice as long each time
  	up to the most */
-@@ -321,9 +326,11 @@ static long objects_host_told[MAXIMUM_TRACKED_OBJECTS];
+@@ -238,6 +243,10 @@ enum
+ 	/* (struct distributed_object_state, the host's) the host has the vehicle
+ 	where the client it goes to had it at the tick in time */
+ 	_distributed_object_predicted_bit,
++	/* (struct distributed_object_state) a unit's integrated light is on, and
++	the host sent it at all: older builds leave both 0, which is not "off" */
++	_distributed_object_light_sent_bit,
++	_distributed_object_light_on_bit,
+ };
+ 
+ struct distributed_object_change
+@@ -321,9 +330,11 @@ static long objects_host_told[MAXIMUM_TRACKED_OBJECTS];
  static long objects_host_resting_cursor;
  /* ... past the highest of them */
  static long objects_host_told_count;
@@ -1449,7 +1590,39 @@ index 454cbc01..7fee7a8e 100644
  /* ... what each unit's inventory was last sent as (in all, and its weapons
  and grenades), when to every client, and when its ammunition alone last
  changed (NONE: not since); when it last carried anything (NONE: never) */
-@@ -1353,12 +1360,22 @@ enum
+@@ -665,6 +676,18 @@ static boolean distributed_vehicle_unsteered(
+ 		unit_get(vehicle->unit.driver_object_index)->unit.player_index == NONE;
+ }
+ 
++/* whether this machine's player drives the unit: it is their biped, or the
++vehicle they drive */
++static boolean distributed_unit_driven_here(
++	long unit_index)
++{
++	struct unit_datum *unit = unit_get(unit_index);
++
++	if (unit->unit.driver_object_index != NONE)
++		unit = unit_get(unit->unit.driver_object_index);
++	return unit->unit.player_index != NONE && distributed_player_is_local(unit->unit.player_index);
++}
++
+ /* Whether a client puts its copy exactly where the host has it, rather than
+ closing on it: an unsteered vehicle, and anything in a co-op cutscene
+ (where it keeps up with the host's camera). */
+@@ -800,6 +823,12 @@ static void distributed_state_from_object(
+ 	SET_FLAG(state->flags, _distributed_object_at_rest_bit, TEST_FLAG(object->object.flags, _object_at_rest_bit));
+ 	SET_FLAG(state->flags, _distributed_object_dead_bit, TEST_FLAG(_object_mask_unit, object->object.type) &&
+ 		TEST_FLAG(object->object.damage_flags, _object_dead_bit));
++	if (TEST_FLAG(_object_mask_unit, object->object.type))
++	{
++		SET_FLAG(state->flags, _distributed_object_light_sent_bit, TRUE);
++		SET_FLAG(state->flags, _distributed_object_light_on_bit,
++			TEST_FLAG(unit_get(object_index)->unit.flags, _unit_integrated_light_on_bit));
++	}
+ 	state->position = object->object.position;
+ 	distributed_vector_pack(&object->object.forward, DISTRIBUTED_UNIT_SCALE, &state->forward);
+ 	distributed_vector_pack(&object->object.up, DISTRIBUTED_UNIT_SCALE, &state->up);
+@@ -1353,12 +1382,22 @@ enum
  	_host_state_to_all,
  };
  
@@ -1475,7 +1648,7 @@ index 454cbc01..7fee7a8e 100644
  static void distributed_host_send_states(
  	void)
  {
-@@ -1386,7 +1403,9 @@ static void distributed_host_send_states(
+@@ -1386,7 +1425,9 @@ static void distributed_host_send_states(
  			continue;
  		at_rest = TEST_FLAG(object_get(object_index)->object.flags, _object_at_rest_bit);
  		objects_host_state_moving[absolute_index] = !at_rest;
@@ -1486,7 +1659,33 @@ index 454cbc01..7fee7a8e 100644
  			continue;
  		distributed_state_from_object(object_index, &states[state_count]);
  		kinds[state_count++] = at_rest ? _host_state_to_all : _host_state_moving;
-@@ -2459,6 +2478,8 @@ void network_objects_handle_states(
+@@ -2133,6 +2174,12 @@ static boolean distributed_client_change_valid(
+ 		team_count = game_engine_get_variant()->game_engine_index == game_engine_ctf ? CTF_FLAG_TEAMS : ODDBALL_TEAMS;
+ 	if (change->owner_team_index != NONE && (change->owner_team_index < 0 || change->owner_team_index >= team_count))
+ 		return FALSE;
++	/* (a flag or ball of no team would index the game type's arrays at -1) */
++	if (type == _object_type_weapon && ((weapon_definition_get(change->definition_index)->weapon.flags >> 3) & 1) &&
++		change->owner_team_index == NONE)
++	{
++		return FALSE;
++	}
+ 	/* (its colors numbers) */
+ 	{
+ 		short color_index;
+@@ -2291,6 +2338,12 @@ static void distributed_client_create(
+ 		return;
+ 	}
+ 	objects_client_has[absolute_index] = object_index;
++	/* (a unit's grenades are the host's, which its inventories bring: none
++	until they come, not the tag's that unit_new gave it, which the host's
++	game engine replaces with the game's at a player's spawn: a player
++	spawned with the button held threw one here the host's copy had not) */
++	if (TEST_FLAG(_object_mask_unit, object_get(object_index)->object.type))
++		csmemset(unit_get(object_index)->unit.grenade_counts, 0, sizeof(unit_get(object_index)->unit.grenade_counts));
+ 	distributed_client_apply_change(object_index, change);
+ }
+ 
+@@ -2459,10 +2512,23 @@ void network_objects_handle_states(
  		real blend_distance = REMOTE_BLEND_DISTANCE;
  		real_vector3d forward, up, velocity, angular_velocity;
  		real dx, dy, dz;
@@ -1495,7 +1694,22 @@ index 454cbc01..7fee7a8e 100644
  
  		if (!distributed_object_index_valid(state->object_index) || !network_objects_client_has(state->object_index))
  			continue;
-@@ -2517,8 +2538,15 @@ void network_objects_handle_states(
+ 		object = object_get(state->object_index);
++		/* (the unit's light as the host has it: only presses toggle it here,
++		so one missed, or made before this machine joined, left it wrong for
++		good. Not for what this machine's player drives: their press lands
++		here first) */
++		if (TEST_FLAG(state->flags, _distributed_object_light_sent_bit) &&
++			TEST_FLAG(_object_mask_unit, object->object.type) &&
++			!distributed_unit_driven_here(state->object_index))
++		{
++			SET_FLAG(unit_get(state->object_index)->unit.flags, _unit_integrated_light_on_bit,
++				TEST_FLAG(state->flags, _distributed_object_light_on_bit));
++		}
+ 		if (TEST_FLAG(state->flags, _distributed_object_dead_bit))
+ 		{
+ 			distributed_client_dead_biped(state->object_index);
+@@ -2517,8 +2583,15 @@ void network_objects_handle_states(
  				/* (turned as it drives it) */
  				angle_tolerance = -1.0f;
  				blend_distance = 0.0f;
@@ -1511,7 +1725,7 @@ index 454cbc01..7fee7a8e 100644
  		dx = state->position.x - object->object.position.x;
  		dy = state->position.y - object->object.position.y;
  		dz = state->position.z - object->object.position.z;
-@@ -2535,8 +2563,9 @@ void network_objects_handle_states(
+@@ -2535,8 +2608,9 @@ void network_objects_handle_states(
  		{
  			distributed_count_correction();
  		}
@@ -1523,7 +1737,32 @@ index 454cbc01..7fee7a8e 100644
  	}
  }
  
-@@ -3053,6 +3082,7 @@ void network_objects_new_game(
+@@ -2846,6 +2920,24 @@ void network_objects_set_seat(
+ 		{
+ 			return;
+ 		}
++		/* (and not one the unit carries, however far down: a ring of
++		parents would turn every walk up them forever) */
++		{
++			long ancestor_index = vehicle->object.parent_object_index;
++			long steps;
++
++			for (steps = 0; ancestor_index != NONE; steps++)
++			{
++				struct object_header_datum const *ancestor;
++
++				if (ancestor_index == unit_index || steps >= 16)
++					return;
++				ancestor = (struct object_header_datum const *)datum_try_and_get(object_header_data, ancestor_index);
++				if (!ancestor || !ancestor->datum)
++					return;
++				ancestor_index = ancestor->datum->object.parent_object_index;
++			}
++		}
+ 	}
+ 	if (unit->object.parent_object_index != NONE && unit->unit.parent_seat_index != NONE)
+ 		unit_exit_seat_end(unit_index);
+@@ -3053,6 +3145,7 @@ void network_objects_new_game(
  	{
  		objects_host_told[absolute_index] = NONE;
  		objects_host_state_moving[absolute_index] = FALSE;
@@ -2196,7 +2435,7 @@ index 8b048c13..80285de7 100644
  /* the width of the screen the game draws, 480 lines tall: the device's or
  the display's shape, or 640 (port/linux/src/d3d8_gl.c) */
 diff --git a/port/linux/include/halo_port_limits.h b/port/linux/include/halo_port_limits.h
-index 1f61033b..1a2f7eb4 100644
+index 1f61033b..783d1606 100644
 --- a/port/linux/include/halo_port_limits.h
 +++ b/port/linux/include/halo_port_limits.h
 @@ -66,7 +66,7 @@ is newer (network_client_manager.c). A host advertises it, with its netcode,
@@ -2204,7 +2443,7 @@ index 1f61033b..1a2f7eb4 100644
  which hosts built before there was a version send as zeros: version 0.
  Raise it with any change to what the machines send each other. */
 -#define HALO_PORT_NETWORK_VERSION 20
-+#define HALO_PORT_NETWORK_VERSION 24
++#define HALO_PORT_NETWORK_VERSION 26
  /* ... the advertisement's reserved bytes: the version (a little-endian word),
  then flags */
  #define HALO_PORT_ADVERTISED_VERSION_OFFSET 0
@@ -7093,6 +7332,35 @@ index 219a5730..58c51bc0 100644
  #define glCreateShader halo_glCreateShader
  #define glShaderSource halo_glShaderSource
  #define glCompileShader halo_glCompileShader
+diff --git a/port/linux/src/menu_files.c b/port/linux/src/menu_files.c
+index e913c071..ce795529 100644
+--- a/port/linux/src/menu_files.c
++++ b/port/linux/src/menu_files.c
+@@ -484,6 +484,12 @@ static void read_bitmap(struct reader *reader, const XML_Char **attributes)
+ 		length = strcspn(frames, " \t\r\n");
+ 		if (!length)
+ 			break;
++		/* (a bitmap's count of frames is a short of the game's) */
++		if (bitmap.frame_count >= 32767)
++		{
++			reader_error(reader, "a bitmap has too many frames");
++			break;
++		}
+ 		grown = grow(reader, menus->frames, menus->frame_count, sizeof(*menus->frames));
+ 		if (!grown)
+ 			break;
+@@ -535,6 +541,11 @@ static void read_frame(struct reader *reader, const XML_Char **attributes, long
+ 		reader_error(reader, "a bitmap's <frame>s and frames= cannot be mixed");
+ 	if (frame.index < 0)
+ 		frame.index = 0;
++	if (menus->bitmaps[owner].frame_count >= 32767)
++	{
++		reader_error(reader, "a bitmap has too many frames");
++		return;
++	}
+ 	GROW(reader, menus->frames, menus->frame_count);
+ 	menus->frames[menus->frame_count++] = frame;
+ 	menus->bitmaps[owner].frame_count++;
 diff --git a/port/linux/src/nv2a_psh.c b/port/linux/src/nv2a_psh.c
 index 30f65e25..d99f7cf2 100644
 --- a/port/linux/src/nv2a_psh.c
@@ -7636,8 +7904,1970 @@ index 07669656..c9cf2021 100644
 +#endif
  	return text.buffer;
  }
+diff --git a/port/linux/src/p2p.c b/port/linux/src/p2p.c
+index 73f18275..170028e3 100644
+--- a/port/linux/src/p2p.c
++++ b/port/linux/src/p2p.c
+@@ -58,6 +58,9 @@ only look up and create stand-ins.
+ #include "port_config.h"
+ #include "p2p_internal.h"
+ #include "ikcp.h"
++#ifdef HALO_PROFILE
++#include "profile_trace.h"
++#endif
+ 
+ #include <stddef.h>
+ #include <stdio.h>
+@@ -180,6 +183,9 @@ struct peer
+ 	unsigned long virtual_address;
+ 	int is_host;
+ 	int connected;
++	/* the WebRTC connection carrying its tunnel (p2p_webrtc.c: a browser's),
++	or -1 (the UDP tunnel) */
++	int connection;
+ 	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
+ 	int candidate_count;
+ 	struct p2p_candidate endpoint;
+@@ -276,6 +282,32 @@ struct stun_server
+ 
+ pthread_mutex_t p2p_lock = PTHREAD_MUTEX_INITIALIZER;
+ 
++#ifdef HALO_PROFILE
++/* the p2p thread's own track of the profiling build's recording
++(profile_trace.c): profile.c's sections are the game thread's alone */
++static struct
++{
++	int pass;
++	int tunnel_receive;
++	int kcp_update;
++	int streams;
++} p2p_profile_names;
++
++/* the recording's track lock: the game thread flips the recording and its
++arenas under it, and this thread records under it, so each record lands in
++one arena; a pass that drops the lock (DNS, key exchange) can straddle a
++cut, and profile_trace_end drops that scope */
++void p2p_profile_lock(void)
++{
++	pthread_mutex_lock(&p2p_lock);
++}
++
++void p2p_profile_unlock(void)
++{
++	pthread_mutex_unlock(&p2p_lock);
++}
++#endif
++
+ static struct
+ {
+ 	int running;
+@@ -774,7 +806,7 @@ static void peer_send_to(struct peer *peer, const struct p2p_candidate *to, cons
+ 	int sealed;
+ 	int index;
+ 
+-	if (p2p.tunnel_socket < 0 || size > MAXIMUM_INNER_SIZE)
++	if ((p2p.tunnel_socket < 0 && peer->connection < 0) || size > MAXIMUM_INNER_SIZE)
+ 		return;
+ 	/* the header, authenticated with the rest */
+ 	counter = ++peer->send_counter;
+@@ -785,6 +817,12 @@ static void peer_send_to(struct peer *peer, const struct p2p_candidate *to, cons
+ 	packet_nonce(packet, nonce);
+ 	sealed = p2p_aead_seal(peer->send_key, nonce, packet, TUNNEL_HEADER_SIZE, inner, size,
+ 		packet + TUNNEL_HEADER_SIZE);
++	/* (a browser's: over its WebRTC connection, wherever that goes) */
++	if (peer->connection >= 0)
++	{
++		p2p_webrtc_send(peer->connection, packet, TUNNEL_HEADER_SIZE + sealed);
++		return;
++	}
+ 	make_address(&address, to->address, to->port);
+ 	posix_socket_sendto(p2p.tunnel_socket, packet, TUNNEL_HEADER_SIZE + sealed, 0, &address, sizeof(address));
+ }
+@@ -872,6 +910,8 @@ static void drop_peer(struct peer *peer, const char *reason)
+ 		peer_send(peer, &bye, 1);
+ 	}
+ 	release_peer_links((int)(peer - p2p.peers), 0);
++	if (peer->connection >= 0)
++		p2p_webrtc_close(peer->connection);
+ 	/* a session that ended does not come back: its packets would pass
+ 	again */
+ 	memcpy(retired->secret, peer->secret, P2P_SHA256_SIZE);
+@@ -956,7 +996,7 @@ int p2p_peer_turned_away(const unsigned char *peer_identifier, int is_host)
+ }
+ 
+ int p2p_peer_offered(const unsigned char *peer_identifier, const unsigned char *secret,
+-	const struct p2p_candidate *candidates, int count, int is_host)
++	const struct p2p_candidate *candidates, int count, const struct p2p_webrtc *webrtc, int is_host)
+ {
+ 	struct peer *peer = find_peer(peer_identifier);
+ 
+@@ -991,24 +1031,43 @@ int p2p_peer_offered(const unsigned char *peer_identifier, const unsigned char *
+ 		peer->receive_window = 1;
+ 		peer->virtual_address = virtual_address_for(peer_identifier);
+ 		peer->is_host = is_host;
++		peer->connection = -1;
+ 		peer->offered_time = p2p_now();
+-		platform_log("Internet play: reaching %s %s", is_host ? "host" : "player", peer->name);
++		platform_log("Internet play: reaching %s %s%s", is_host ? "host" : "player", peer->name,
++			webrtc->kind == _p2p_webrtc_browser ? " (a browser)" : "");
+ 	}
+ 	add_candidates(peer, candidates, count);
++	peer->connection = p2p_webrtc_offered(peer->connection, (int)(peer - p2p.peers), peer->secret, webrtc,
++		candidates, count, peer->is_host);
+ 	return 1;
+ }
+ 
+ int p2p_peer_reoffered(const unsigned char *peer_identifier, const unsigned char *secret,
+-	const struct p2p_candidate *candidates, int count)
++	const struct p2p_candidate *candidates, int count, const struct p2p_webrtc *webrtc)
+ {
+ 	struct peer *peer = find_peer(peer_identifier);
+ 
+ 	if (!peer || memcmp(peer->secret, secret, P2P_SHA256_SIZE))
+ 		return 0;
+ 	add_candidates(peer, candidates, count);
++	if (count || webrtc->ufrag[0])
++	{
++		peer->connection = p2p_webrtc_offered(peer->connection, (int)(peer - p2p.peers), peer->secret, webrtc,
++			candidates, count, peer->is_host);
++	}
+ 	return 1;
+ }
+ 
++void p2p_peer_name(int peer, char *name)
++{
++	memcpy(name, p2p.peers[peer].name, sizeof(p2p.peers[peer].name));
++}
++
++unsigned short p2p_tunnel_local_port(void)
++{
++	return p2p.tunnel_port;
++}
++
+ /* whether a packet of this number from the peer is new: not received yet,
+ nor from before the window */
+ static int packet_fresh(const struct peer *peer, unsigned long long counter)
+@@ -1107,8 +1166,10 @@ static void update_peers(void)
+ 			/* (every address it gave, until a packet sealed by it arrives
+ 			from one: then only that one, above. The addresses are anyone's
+ 			who has the invite to give, so they are sent to no longer than
+-			this) */
+-			for (candidate = 0; candidate < peer->candidate_count; candidate++)
++			this. A browser's go over its WebRTC connection, once it is open) */
++			if (peer->connection >= 0)
++				peer_ping(peer, &peer->endpoint);
++			for (candidate = 0; candidate < peer->candidate_count && peer->connection < 0; candidate++)
+ 				peer_ping(peer, &peer->candidates[candidate]);
+ 			peer->sent_time = p2p_now();
+ 		}
+@@ -1142,6 +1203,10 @@ static void stun_setup(void)
+ {
+ 	const char *text = config_string("network.stun_servers");
+ 
++#ifdef HALO_WEB
++	/* (a page's addresses are its WebRTC connections' own: web_p2p.c) */
++	text = "";
++#endif
+ 	while (*text && p2p.stun_count < MAXIMUM_STUN_SERVERS)
+ 	{
+ 		const char *end = text + strcspn(text, ",");
+@@ -2232,6 +2297,24 @@ static void tunnel_received(const unsigned char *packet, int size, const struct
+ 	}
+ }
+ 
++void p2p_tunnel_packet(const unsigned char *packet, int size, unsigned long address, unsigned short port)
++{
++	struct sockaddr_in from;
++
++	make_address(&from, address, port);
++	tunnel_received(packet, size, &from);
++}
++
++void p2p_tunnel_send(unsigned long address, unsigned short port, const void *data, int size)
++{
++	struct sockaddr_in to;
++
++	if (p2p.tunnel_socket < 0)
++		return;
++	make_address(&to, address, port);
++	posix_socket_sendto(p2p.tunnel_socket, data, size, 0, &to, sizeof(to));
++}
++
+ static void tunnel_readable(void)
+ {
+ 	unsigned char packet[2048];
+@@ -2245,7 +2328,9 @@ static void tunnel_readable(void)
+ 
+ 		if (size < 0)
+ 			break;
+-		tunnel_received(packet, size, &from);
++		/* (a browser's ICE checks and DTLS, which carries its tunnel) */
++		if (!p2p_webrtc_received(packet, size, from.sin_addr.s_addr, from.sin_port))
++			tunnel_received(packet, size, &from);
+ 	}
+ }
+ 
+@@ -2264,14 +2349,20 @@ static int parse_invite(const char *text, unsigned char *host_hash, unsigned cha
+ 
+ 	for (search = text; *search && !start; search++)
+ 	{
+-		static const char prefix[] = "halo://join/";
+-		int length;
++		/* (a link, or the web page's address with one: ?join=) */
++		static const char *const prefixes[] = { "halo://join/", "?join=", "&join=" };
++		int prefix;
+ 
+-		for (length = 0; prefix[length] && search[length] &&
+-			(search[length] | 0x20) == prefix[length]; length++)
+-			;
+-		if (!prefix[length])
+-			start = search + length;
++		for (prefix = 0; prefix < (int)(sizeof(prefixes) / sizeof(*prefixes)) && !start; prefix++)
++		{
++			int length;
++
++			for (length = 0; prefixes[prefix][length] && search[length] &&
++				(search[length] | 0x20) == prefixes[prefix][length]; length++)
++				;
++			if (!prefixes[prefix][length])
++				start = search + length;
++		}
+ 	}
+ 	if (!start)
+ 	{
+@@ -2358,9 +2449,10 @@ static void update_joining(void)
+ 
+ 	if (p2p.join_requested)
+ 	{
+-		/* the offer carries the public address, if there is one */
++		/* the offer carries the public address, if there is one, and a
++		browser's WebRTC */
+ 		p2p.stun_started = 1;
+-		if (!stun_settled())
++		if (!stun_settled() || !p2p_webrtc_ready())
+ 			return;
+ 		p2p.join_requested = 0;
+ 		p2p.joining = 1;
+@@ -2621,6 +2713,10 @@ static void update_upnp(void)
+ 
+ 	if (allowed < 0)
+ 		allowed = config_boolean("network.allow_upnp") ? 1 : 0;
++#ifdef HALO_WEB
++	/* (a page cannot reach the router) */
++	allowed = 0;
++#endif
+ 	if (!allowed || p2p.upnp_working || p2p.upnp_released)
+ 		return;
+ 	if (p2p.upnp_forwarded)
+@@ -2822,8 +2918,17 @@ static void *p2p_thread(void *unused)
+ 	static int read[MAXIMUM_SOCKETS], write[MAXIMUM_SOCKETS];
+ 	static int asked_read[MAXIMUM_SOCKETS], asked_write[MAXIMUM_SOCKETS];
+ 	static int read_owners[MAXIMUM_SOCKETS], write_owners[MAXIMUM_SOCKETS];
++	/* WebRTC's connections opening or open (their timers) */
++	int webrtc_busy = 0;
+ 
+ 	(void)unused;
++#ifdef HALO_PROFILE
++	profile_trace_thread_register(_profile_track_p2p);
++	p2p_profile_names.pass = profile_trace_name("p2p.pass");
++	p2p_profile_names.tunnel_receive = profile_trace_name("p2p.tunnel_receive");
++	p2p_profile_names.kcp_update = profile_trace_name("p2p.kcp_update");
++	p2p_profile_names.streams = profile_trace_name("p2p.streams");
++#endif
+ 	pthread_mutex_lock(&p2p_lock);
+ #ifndef HALO_ANDROID
+ 	/* (here: it may wait for a program) */
+@@ -2835,7 +2940,7 @@ static void *p2p_thread(void *unused)
+ 		int asked_read_count, asked_write_count;
+ 		/* KCP's clock needs a pass every LOOP_INTERVAL while it carries
+ 		streams; otherwise the thread can sleep longer */
+-		int wait = LOOP_INTERVAL * 5;
++		int wait = webrtc_busy ? LOOP_INTERVAL : LOOP_INTERVAL * 5;
+ 		int index, asked;
+ 
+ 		/* what to wait for */
+@@ -2903,6 +3008,9 @@ static void *p2p_thread(void *unused)
+ 			read_count = write_count = 0;
+ 		}
+ 		pthread_mutex_lock(&p2p_lock);
++#ifdef HALO_PROFILE
++		profile_trace_begin(p2p_profile_names.pass);
++#endif
+ 
+ 		/* what is ready (the lists now hold only ready sockets, in the order
+ 		asked, so each one's owner is found going along both); a socket
+@@ -2921,7 +3029,13 @@ static void *p2p_thread(void *unused)
+ 			switch (owner & 255)
+ 			{
+ 			case _owner_tunnel:
++#ifdef HALO_PROFILE
++				profile_trace_begin(p2p_profile_names.tunnel_receive);
++#endif
+ 				tunnel_readable();
++#ifdef HALO_PROFILE
++				profile_trace_end(p2p_profile_names.tunnel_receive);
++#endif
+ 				break;
+ 			case _owner_handoff:
+ 				if (socket == p2p.handoff_socket)
+@@ -2941,6 +3055,9 @@ static void *p2p_thread(void *unused)
+ 				break;
+ 			}
+ 		}
++#ifdef HALO_PROFILE
++		profile_trace_begin(p2p_profile_names.streams);
++#endif
+ 		for (index = 0, asked = 0; index < write_count; index++)
+ 		{
+ 			int socket = write[index];
+@@ -2965,14 +3082,24 @@ static void *p2p_thread(void *unused)
+ 			if (stream->used && stream->state == _stream_connecting && elapsed(stream->created_time, 5000))
+ 				stream_local_closed(stream);
+ 		}
++#ifdef HALO_PROFILE
++		profile_trace_end(p2p_profile_names.streams);
++#endif
+ 		p2p_signal_update(read, read_count, write, write_count);
+ 
++#ifdef HALO_PROFILE
++		profile_trace_begin(p2p_profile_names.kcp_update);
++#endif
+ 		for (index = 0; index < MAXIMUM_STREAMS; index++)
+ 		{
+ 			if (p2p.streams[index].used)
+ 				stream_update(&p2p.streams[index]);
+ 		}
++#ifdef HALO_PROFILE
++		profile_trace_end(p2p_profile_names.kcp_update);
++#endif
+ 		update_peers();
++		webrtc_busy = p2p_webrtc_update();
+ 		expire_proxies();
+ 		stun_update();
+ 		update_hosting();
+@@ -2999,6 +3126,9 @@ static void *p2p_thread(void *unused)
+ 		p2p_discord_update();
+ #ifdef HALO_ANDROID
+ 		poll_invite_file();
++#endif
++#ifdef HALO_PROFILE
++		profile_trace_end(p2p_profile_names.pass);
+ #endif
+ 	}
+ 	return NULL;
+diff --git a/port/linux/src/p2p_crypto.c b/port/linux/src/p2p_crypto.c
+index 13674dcb..935c00a3 100644
+--- a/port/linux/src/p2p_crypto.c
++++ b/port/linux/src/p2p_crypto.c
+@@ -13,7 +13,6 @@ brokers carry sealed messages, so only holders of the invite read them; the
+ tunnel's packets are sealed with keys only its two machines have.
+ */
+ 
+-#include "platform.h"
+ #include "posix.h"
+ #include "p2p_internal.h"
+ 
+@@ -704,3 +703,15 @@ int p2p_ed25519_verify(const unsigned char *public_key, const void *message, int
+ 	return p2p_ed25519_to_x25519(public_key, x25519_public) &&
+ 		crypto_ed25519_check(signature, public_key, message, (size_t)size) == 0;
+ }
++
++/* a native build's ICE credentials (p2p_webrtc.c) from a session's secret:
++8 and 32 hexadecimal digits */
++void p2p_webrtc_credentials(const unsigned char *secret, char *ufrag, char *password)
++{
++	unsigned char digest[P2P_SHA256_SIZE];
++
++	p2p_hmac_sha256(secret, P2P_SHA256_SIZE, "webrtc ice-ufrag", 16, digest);
++	p2p_hex(digest, 4, ufrag);
++	p2p_hmac_sha256(secret, P2P_SHA256_SIZE, "webrtc ice-pwd", 14, digest);
++	p2p_hex(digest, 16, password);
++}
+diff --git a/port/linux/src/p2p_internal.h b/port/linux/src/p2p_internal.h
+index 74d260a0..b3e54d6a 100644
+--- a/port/linux/src/p2p_internal.h
++++ b/port/linux/src/p2p_internal.h
+@@ -84,23 +84,25 @@ void p2p_identifier_from_hash(const unsigned char *hash, unsigned char *identifi
+ 0 if the key is unusable (one giving a known secret). The p2p thread's: it
+ lets go of the p2p lock while it works it out */
+ int p2p_shared_secret(const unsigned char *public_key, unsigned char *shared);
+-/* a joiner (on the host) or the host (on a joiner) offered its addresses
+-through signalling, with the secret of a session (P2P_SHA256_SIZE bytes) its
++/* a joiner (on the host) or the host (on a joiner) offered its addresses and
++its WebRTC through signalling, with the secret of a session (P2P_SHA256_SIZE bytes) its
+ tunnel's keys come from; the tunnel starts reaching it. Returns 0 if it was
+ turned away: another session with that machine lives (it must lapse first),
+ this one has ended, or there is no room */
++struct p2p_webrtc;
+ int p2p_peer_offered(const unsigned char *identifier, const unsigned char *secret,
+-	const struct p2p_candidate *candidates, int count, int is_host);
++	const struct p2p_candidate *candidates, int count, const struct p2p_webrtc *webrtc, int is_host);
+ /* whether p2p_peer_offered would turn a new session with that machine away
+ now (it is this machine, a session with it lives, there is no room, or, as
+ a host, too many players are being reached): checked before its secret is
+ worked out */
+ int p2p_peer_turned_away(const unsigned char *identifier, int is_host);
+-/* ... more addresses of a machine whose session (that secret's) lives: 0 if
+-none does (a session that has ended is never taken up again: its keys'
++/* ... more addresses of a machine whose session (that secret's) lives, and
++its WebRTC (a browser host's credentials come once the request is proven):
++0 if none does (a session that has ended is never taken up again: its keys'
+ packet numbers would start again) */
+ int p2p_peer_reoffered(const unsigned char *identifier, const unsigned char *secret,
+-	const struct p2p_candidate *candidates, int count);
++	const struct p2p_candidate *candidates, int count, const struct p2p_webrtc *webrtc);
+ /* an invite that arrived on the p2p thread (from Discord, or another copy
+ of the game) */
+ void p2p_invite_received(const char *text);
+@@ -219,6 +221,86 @@ void p2p_seal_token(const unsigned char *key, const unsigned char *signing_key,
+ int p2p_unseal_token(const unsigned char *key, const unsigned char *signing_key, const unsigned char *sealed,
+ 	unsigned char *token);
+ 
++/* ---------- WebRTC: tunnels to and from browsers (p2p_webrtc.c in the
++native builds, port/web/src/web_p2p.c in the browser) */
++
++enum
++{
++	/* what a machine says of itself in signalling: nothing (no machine of
++	this version), a native build (which takes browsers' WebRTC on its
++	tunnel's socket), or a browser (which has WebRTC alone) */
++	_p2p_webrtc_none = 0,
++	_p2p_webrtc_native,
++	_p2p_webrtc_browser,
++	/* the SHA-256 of a DTLS certificate */
++	P2P_FINGERPRINT_SIZE = 32,
++	/* a browser's own addresses, which it hides behind mDNS names (another
++	browser on its network can look them up), and a name's text with its
++	end */
++	P2P_MAXIMUM_WEBRTC_NAMES = 2,
++	P2P_WEBRTC_NAME_SIZE = 64,
++	/* ICE's username fragment and password, as text with their end */
++	P2P_ICE_UFRAG_SIZE = 33,
++	P2P_ICE_PASSWORD_SIZE = 65,
++};
++
++/* a machine's WebRTC, as signalled */
++struct p2p_webrtc
++{
++	int kind;
++	unsigned char fingerprint[P2P_FINGERPRINT_SIZE];
++	/* a browser's ICE credentials (empty until it has a connection for the
++	other machine: a host's, once the joiner proved its request). A native
++	build's come from the session's secret (p2p_webrtc_credentials) */
++	char ufrag[P2P_ICE_UFRAG_SIZE];
++	char password[P2P_ICE_PASSWORD_SIZE];
++	/* a browser's addresses on its own network, as mDNS names
++	("<uuid>.local") and ports (network byte order) */
++	int name_count;
++	char names[P2P_MAXIMUM_WEBRTC_NAMES][P2P_WEBRTC_NAME_SIZE];
++	unsigned short name_ports[P2P_MAXIMUM_WEBRTC_NAMES];
++};
++
++/* whether this machine's WebRTC can be told yet (a browser's: its
++certificate and a connection ready; a native build's at once) */
++int p2p_webrtc_ready(void);
++/* this machine's WebRTC for a message to the machine with this identifier
++(the host joined, or a joiner answered: proven, or not yet), and the
++addresses it offers it; returns their count */
++int p2p_webrtc_describe(const unsigned char *identifier, int proven, struct p2p_webrtc *local,
++	struct p2p_candidate *candidates, int maximum_count);
++/* a new request to join (p2p_signal_join): a browser's connection for the
++last one, not taken up by a session, goes */
++void p2p_webrtc_new_request(void);
++/* a session with the peer (p2p.c's index) whose machine has this WebRTC
++was offered, or offered again (more addresses, a browser's credentials):
++the WebRTC connection that carries its tunnel (an index, kept by p2p.c), or
++-1 if none does (two native builds: their UDP tunnel). connection is the one
++returned before (-1 the first time) */
++int p2p_webrtc_offered(int connection, int peer, const unsigned char *secret, const struct p2p_webrtc *remote,
++	const struct p2p_candidate *candidates, int count, int is_host);
++void p2p_webrtc_close(int connection);
++/* a tunnel packet to the connection's peer (dropped until it is open) */
++void p2p_webrtc_send(int connection, const void *packet, int size);
++/* a datagram that arrived on the tunnel's socket: 1 if it was WebRTC's (an
++ICE check, DTLS), taken */
++int p2p_webrtc_received(const unsigned char *packet, int size, unsigned long address, unsigned short port);
++/* timers (DTLS, SCTP) and hole punching; called from the p2p thread each
++pass: whether a connection is opening or open (the thread passes often) */
++int p2p_webrtc_update(void);
++/* a native build's ICE credentials from a session's secret (both ends work
++them out: they do not travel); p2p_crypto.c's */
++void p2p_webrtc_credentials(const unsigned char *secret, char *ufrag, char *password);
++
++/* p2p.c's, which WebRTC calls: a tunnel packet a connection carried, a
++datagram it sends on the tunnel's socket, and a peer's name as logged (its
++identifier in hex: 2 * P2P_IDENTIFIER_SIZE + 1 characters) */
++void p2p_tunnel_packet(const unsigned char *packet, int size, unsigned long address, unsigned short port);
++void p2p_tunnel_send(unsigned long address, unsigned short port, const void *data, int size);
++void p2p_peer_name(int peer, char *name);
++/* the tunnel's socket's port (network byte order) */
++unsigned short p2p_tunnel_local_port(void);
++
+ /* ---------- p2p_lobby.c: public games' listings */
+ 
+ /* the p2p thread's pass: the token of the game hosted for the internet
+diff --git a/port/linux/src/p2p_signal.c b/port/linux/src/p2p_signal.c
+index 23c464c6..efd1259e 100644
+--- a/port/linux/src/p2p_signal.c
++++ b/port/linux/src/p2p_signal.c
+@@ -191,8 +191,9 @@ enum
+ {
+ 	_message_join = 'J',
+ 	_message_accept = 'A',
+-	/* 3: a JOIN proves its key before the host makes a session */
+-	MESSAGE_VERSION = 3,
++	/* 3: a JOIN proves its key before the host makes a session; 4: both
++	messages say the machine's WebRTC (p2p_webrtc.c), so browsers join */
++	MESSAGE_VERSION = 4,
+ };
+ 
+ struct broker
+@@ -812,10 +813,18 @@ static void broker_connect(struct broker *broker)
+ 
+ /* ---------- addresses */
+ 
+-static int put_candidates(unsigned char *message)
++/* this machine's addresses and its WebRTC (p2p_webrtc_describe), for a
++message to the machine with that identifier: the count of addresses, each
++address and port, then the WebRTC's kind and, unless none, the certificate's
++hash, the ICE username fragment and password, each after its length, and
++the count of mDNS names, each after its length and before its port; returns
++the bytes written */
++static int put_addresses(unsigned char *message, const unsigned char *identifier, int proven)
+ {
+ 	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
+-	int count = p2p_local_candidates(candidates, P2P_MAXIMUM_CANDIDATES);
++	struct p2p_webrtc webrtc;
++	int count = p2p_webrtc_describe(identifier, proven, &webrtc, candidates, P2P_MAXIMUM_CANDIDATES);
++	int size;
+ 	int index;
+ 
+ 	message[0] = (unsigned char)count;
+@@ -824,20 +833,84 @@ static int put_candidates(unsigned char *message)
+ 		memcpy(message + 1 + index * 6, &candidates[index].address, 4);
+ 		memcpy(message + 1 + index * 6 + 4, &candidates[index].port, 2);
+ 	}
+-	return 1 + count * 6;
++	size = 1 + count * 6;
++	message[size++] = (unsigned char)webrtc.kind;
++	if (webrtc.kind == _p2p_webrtc_none)
++		return size;
++	memcpy(message + size, webrtc.fingerprint, P2P_FINGERPRINT_SIZE);
++	size += P2P_FINGERPRINT_SIZE;
++	message[size] = (unsigned char)strlen(webrtc.ufrag);
++	memcpy(message + size + 1, webrtc.ufrag, message[size]);
++	size += 1 + message[size];
++	message[size] = (unsigned char)strlen(webrtc.password);
++	memcpy(message + size + 1, webrtc.password, message[size]);
++	size += 1 + message[size];
++	message[size++] = (unsigned char)webrtc.name_count;
++	for (index = 0; index < webrtc.name_count; index++)
++	{
++		message[size] = (unsigned char)strlen(webrtc.names[index]);
++		memcpy(message + size + 1, webrtc.names[index], message[size]);
++		size += 1 + message[size];
++		memcpy(message + size, &webrtc.name_ports[index], 2);
++		size += 2;
++	}
++	return size;
+ }
+ 
+-static int get_candidates(const unsigned char *message, int size, struct p2p_candidate *candidates)
++/* whether text is an mDNS name of a browser's address: letters, digits and
++"-" before ".local" (a browser puts it in its session description) */
++static int webrtc_name_valid(const char *text)
+ {
+-	int count;
++	int length = (int)strlen(text);
++
++	return length > 6 && !strcmp(text + length - 6, ".local") && (int)strspn(text,
++		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-") == length - 6;
++}
++
++/* ICE's text (RFC 8839's ice-char: letters, digits, "+" and "/"), of a
++length from minimum to maximum, or none; a browser puts it in its session
++description */
++static int get_ice_text(const unsigned char *message, int size, int *offset, int minimum, int maximum,
++	char *text)
++{
++	int length;
++	int index;
++
++	if (*offset >= size)
++		return 0;
++	length = message[(*offset)++];
++	if ((length && (length < minimum || length > maximum)) || *offset + length > size)
++		return 0;
++	for (index = 0; index < length; index++)
++	{
++		char character = (char)message[*offset + index];
++
++		if (!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
++			(character >= '0' && character <= '9') || character == '+' || character == '/'))
++		{
++			return 0;
++		}
++		text[index] = character;
++	}
++	text[length] = 0;
++	*offset += length;
++	return 1;
++}
++
++/* the reverse: the bytes read, or -1 if they are not made so */
++static int get_addresses(const unsigned char *message, int size, struct p2p_candidate *candidates, int *count,
++	struct p2p_webrtc *webrtc)
++{
++	int offset;
+ 	int index;
+ 
+-	if (size < 1)
++	memset(webrtc, 0, sizeof(*webrtc));
++	if (size < 2)
+ 		return -1;
+-	count = message[0];
+-	if (count > P2P_MAXIMUM_CANDIDATES || size < 1 + count * 6)
++	*count = message[0];
++	if (*count > P2P_MAXIMUM_CANDIDATES || size < 2 + *count * 6)
+ 		return -1;
+-	for (index = 0; index < count; index++)
++	for (index = 0; index < *count; index++)
+ 	{
+ 		unsigned int address;
+ 
+@@ -845,7 +918,43 @@ static int get_candidates(const unsigned char *message, int size, struct p2p_can
+ 		candidates[index].address = address;
+ 		memcpy(&candidates[index].port, message + 1 + index * 6 + 4, 2);
+ 	}
+-	return count;
++	offset = 1 + *count * 6;
++	webrtc->kind = message[offset++];
++	if (webrtc->kind == _p2p_webrtc_none)
++		return offset;
++	if ((webrtc->kind != _p2p_webrtc_native && webrtc->kind != _p2p_webrtc_browser) ||
++		offset + P2P_FINGERPRINT_SIZE > size)
++	{
++		return -1;
++	}
++	memcpy(webrtc->fingerprint, message + offset, P2P_FINGERPRINT_SIZE);
++	offset += P2P_FINGERPRINT_SIZE;
++	if (!get_ice_text(message, size, &offset, 4, P2P_ICE_UFRAG_SIZE - 1, webrtc->ufrag) ||
++		!get_ice_text(message, size, &offset, 22, P2P_ICE_PASSWORD_SIZE - 1, webrtc->password) ||
++		!webrtc->ufrag[0] != !webrtc->password[0] || offset >= size)
++	{
++		return -1;
++	}
++	webrtc->name_count = message[offset++];
++	if (webrtc->name_count > P2P_MAXIMUM_WEBRTC_NAMES)
++		return -1;
++	for (index = 0; index < webrtc->name_count; index++)
++	{
++		int length;
++
++		if (offset >= size)
++			return -1;
++		length = message[offset++];
++		if (length >= P2P_WEBRTC_NAME_SIZE || offset + length + 2 > size)
++			return -1;
++		memcpy(webrtc->names[index], message + offset, (size_t)length);
++		webrtc->names[index][length] = 0;
++		memcpy(&webrtc->name_ports[index], message + offset + length, 2);
++		offset += length + 2;
++		if (!webrtc_name_valid(webrtc->names[index]) || !webrtc->name_ports[index])
++			return -1;
++	}
++	return offset;
+ }
+ 
+ /* ---------- the keys: what only a joiner and the host can work out */
+@@ -950,7 +1059,7 @@ static void send_join(void)
+ 	size += P2P_KEY_SIZE;
+ 	memcpy(message + size, signalling.join_nonce, NONCE_SIZE);
+ 	size += NONCE_SIZE;
+-	size += put_candidates(message + size);
++	size += put_addresses(message + size, signalling.join_host, 1);
+ 	/* answered: the proof that this machine holds its key, of which the host
+ 	makes the session */
+ 	if (signalling.join_answered)
+@@ -1033,7 +1142,7 @@ static void send_accept(struct broker *broker, const unsigned char *identifier,
+ 	size += NONCE_SIZE;
+ 	memcpy(answer + size, host_nonce, NONCE_SIZE);
+ 	size += NONCE_SIZE;
+-	size += put_candidates(answer + size);
++	size += put_addresses(answer + size, identifier, proven);
+ 	message_tag(base, "accept", answer, size, answer + size);
+ 	size += TAG_SIZE;
+ 	size = p2p_seal(signalling.host_key, answer, size, sealed);
+@@ -1048,6 +1157,8 @@ nonce, and a tag) once the host answered it */
+ static void join_received(struct broker *broker, const unsigned char *message, int size)
+ {
+ 	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
++	struct p2p_webrtc webrtc;
++	static const struct p2p_webrtc no_webrtc;
+ 	unsigned char identifier[P2P_IDENTIFIER_SIZE];
+ 	unsigned char request[P2P_IDENTIFIER_SIZE + NONCE_SIZE];
+ 	unsigned char host_nonce[NONCE_SIZE];
+@@ -1061,13 +1172,16 @@ static void join_received(struct broker *broker, const unsigned char *message, i
+ 	struct used_request *used;
+ 	int proven;
+ 	int count;
++	int read;
+ 
+-	if (size < fixed + 1)
++	/* (a browser answers once its WebRTC can be told: the joiner asks
++	again) */
++	if (size < fixed + 1 || !p2p_webrtc_ready())
+ 		return;
+-	count = get_candidates(message + fixed, size - fixed, candidates);
+-	if (count < 0)
++	read = get_addresses(message + fixed, size - fixed, candidates, &count, &webrtc);
++	if (read < 0)
+ 		return;
+-	proven = size - fixed - 1 - count * 6;
++	proven = size - fixed - read;
+ 	if (proven != 0 && proven != PROOF_SIZE)
+ 		return;
+ 	p2p_identifier_for(public_key, identifier);
+@@ -1084,7 +1198,8 @@ static void join_received(struct broker *broker, const unsigned char *message, i
+ 			return;
+ 		}
+ 		if (!elapsed(joiner->answered_broker_times[broker_index], ANSWER_INTERVAL) ||
+-			!p2p_peer_reoffered(identifier, joiner->secret, candidates, proven ? count : 0) ||
++			!p2p_peer_reoffered(identifier, joiner->secret, candidates, proven ? count : 0,
++			proven ? &webrtc : &no_webrtc) ||
+ 			(!proven && !budget_left(&signalling.unproven_answers, MAXIMUM_UNPROVEN_ANSWERS,
+ 			UNPROVEN_ANSWER_INTERVAL, 1)))
+ 		{
+@@ -1171,7 +1286,7 @@ static void join_received(struct broker *broker, const unsigned char *message, i
+ 	if (signalling.used_request_count == MAXIMUM_USED_REQUESTS && !elapsed(used->time, USED_REQUEST_TIME))
+ 		return;
+ 	session_secret(base, nonce, host_nonce, secret);
+-	if (!p2p_peer_offered(identifier, secret, candidates, count, 0))
++	if (!p2p_peer_offered(identifier, secret, candidates, count, &webrtc, 0))
+ 		return;
+ 	memcpy(used->request, request, sizeof(request));
+ 	used->time = p2p_now();
+@@ -1197,6 +1312,7 @@ static void join_received(struct broker *broker, const unsigned char *message, i
+ static void accept_received(const unsigned char *message, int size)
+ {
+ 	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
++	struct p2p_webrtc webrtc;
+ 	unsigned char hash[P2P_KEY_HASH_SIZE];
+ 	unsigned char secret[P2P_SHA256_SIZE];
+ 	const unsigned char *host_public = message + 2;
+@@ -1228,11 +1344,14 @@ static void accept_received(const unsigned char *message, int size)
+ 	/* and the answer is its */
+ 	if (!tag_right(signalling.join_base, "accept", message, size))
+ 		return;
+-	count = get_candidates(message + fixed, size - TAG_SIZE - fixed, candidates);
+-	if (count < 0)
++	if (get_addresses(message + fixed, size - TAG_SIZE - fixed, candidates, &count, &webrtc) !=
++		size - TAG_SIZE - fixed)
++	{
+ 		return;
++	}
+ 	session_secret(signalling.join_base, nonce, host_nonce, secret);
+-	if (!p2p_peer_offered(signalling.join_host, secret, candidates, count, 1) || signalling.join_answered)
++	if (!p2p_peer_offered(signalling.join_host, secret, candidates, count, &webrtc, 1) ||
++		signalling.join_answered)
+ 		return;
+ 	memcpy(signalling.join_host_nonce, host_nonce, NONCE_SIZE);
+ 	signalling.join_answered = 1;
+@@ -1526,6 +1645,19 @@ static void brokers_list(char *text, size_t size)
+ 	int comment = 0;
+ 
+ 	text[0] = 0;
++#ifdef HALO_WEB
++	{
++		/* a page reaches brokers over WebSockets alone (web_net.c): the
++		WebSocket URLs of brokers.txt's that have them, or those the page
++		names (?brokers=, for tests) */
++		const char *page = getenv("HALO_WEB_BROKERS");
++
++		(void)name, (void)path, (void)file, (void)file_size, (void)index, (void)length, (void)comment;
++		snprintf(text, size, "%s", page && *page ? page :
++			"wss://broker.emqx.io:8084/mqtt,wss://broker.hivemq.com:8884/mqtt,wss://test.mosquitto.org:8081/mqtt");
++		return;
++	}
++#endif
+ 	if (name[0] == '/' || name[0] == '\\' || (name[0] && name[1] == ':'))
+ 		snprintf(path, sizeof(path), "%s", name);
+ 	else
+@@ -1594,7 +1726,8 @@ void p2p_signal_start(void)
+ 			broker->socket = -1;
+ 			broker->port = network_short(1883);
+ 			colon = strchr(broker->host, ':');
+-			if (colon)
++			/* (a WebSocket URL is its own address: web_net.c) */
++			if (colon && strncmp(broker->host, "ws://", 5) && strncmp(broker->host, "wss://", 6))
+ 			{
+ 				broker->port = network_short((unsigned short)atoi(colon + 1));
+ 				*colon = 0;
+@@ -1748,7 +1881,9 @@ void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token)
+ 	derive(token, "seal", NULL, signalling.join_key);
+ 	make_topic(token, "host", signalling.join_host, signalling.join_host_topic);
+ 	make_topic(token, "joiner", p2p_identifier(), signalling.join_topic);
+-	/* (new each time: the host makes one session of a request) */
++	/* (new each time: the host makes one session of a request; a browser's
++	connection for the last goes, unless a session took it up) */
++	p2p_webrtc_new_request();
+ 	posix_random_bytes(signalling.join_nonce, NONCE_SIZE);
+ 	signalling.join_nonce_time = p2p_now();
+ 	signalling.join_answered = 0;
+diff --git a/port/linux/src/p2p_webrtc.c b/port/linux/src/p2p_webrtc.c
+new file mode 100644
+index 00000000..914a694c
+--- /dev/null
++++ b/port/linux/src/p2p_webrtc.c
+@@ -0,0 +1,1146 @@
++/*
++P2P_WEBRTC.C
++
++Internet play with browsers (p2p.c): a browser has no UDP socket, only
++WebRTC's data channels, so a native build carries a browser peer's tunnel
++packets over one, on the tunnel's own socket. The packets are internet
++play's, sealed as to any peer; WebRTC is only their way through.
++
++- ICE: this end is an ICE-lite agent (RFC 8445): it answers the browser's
++  connectivity checks (STUN with the session's credentials) and sends none,
++  and the browser chooses the path. Its credentials come from the session's
++  secret (p2p_webrtc_credentials), which both ends have and which never
++  travels; the browser is told its addresses, and it is told the browser's,
++  through signalling. Until the browser is reached it sends STUN binding
++  indications to the browser's addresses every PUNCH_INTERVAL, which open
++  this end's NAT to the browser's checks (the browser's checks open its own).
++- DTLS (posix_dtls.c): this end is the server. The browser's certificate
++  must have the hash the browser signalled (sealed, and bound to its key by
++  the signalling's proof), and this end's, which the browser checks, is
++  signalled the same way.
++- SCTP over DTLS (RFC 8261, 8831), as little of it as one data channel
++  takes: the browser opens the association and this end answers; the
++  channel is negotiated beforehand (id 0, unordered, no retransmissions:
++  the tunnel's datagrams, whose streams KCP makes reliable, as on UDP).
++  Messages larger than a packet are split and joined again. What this end
++  sends and the peer has not acknowledged in ABANDON_TIME is given up
++  (FORWARD-TSN, RFC 3758); what it receives is acknowledged at once.
++
++Everything runs on the p2p thread, under p2p_lock.
++*/
++
++#include "posix.h"
++#include "p2p_internal.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++/* the platform layer's (platform.h, which this file needs no more of: a
++test builds it for the computer it runs on, port/web/tests/webrtc_native.c) */
++void platform_log(const char *format, ...);
++
++enum
++{
++	MAXIMUM_CONNECTIONS = P2P_MAXIMUM_PEERS,
++	/* the addresses ICE checks passed from (a browser checks several) */
++	MAXIMUM_PATHS = 4,
++	MAXIMUM_DATAGRAM = 1500,
++	/* the largest tunnel packet (p2p.c's), and SCTP's data in a packet
++	(under posix_dtls.c's MTU, with SCTP's and DTLS's headers) */
++	MAXIMUM_MESSAGE = 1500,
++	MAXIMUM_CHUNK_DATA = 1100,
++	/* the TSNs past the cumulative one that are kept track of, each way */
++	TSN_WINDOW = 1024,
++	/* fragments of messages kept for joining */
++	MAXIMUM_FRAGMENTS = 16,
++	MAXIMUM_GAP_BLOCKS = 16,
++	SCTP_PORT = 5000,
++	/* the window this end says it has: messages are passed on at once */
++	RECEIVE_WINDOW = 1 << 20,
++	MAXIMUM_STREAMS = 1024,
++
++	/* milliseconds */
++	PUNCH_INTERVAL = 200,
++	PUNCH_TIME = 30000,
++	ABANDON_TIME = 300,
++	FORWARD_INTERVAL = 200,
++	/* a path not checked in this long is not one the browser uses */
++	PATH_TIME = 30000,
++};
++
++/* STUN (RFC 5389) */
++enum
++{
++	STUN_HEADER_SIZE = 20,
++	STUN_COOKIE = 0x2112A442,
++	_stun_binding_request = 0x0001,
++	_stun_binding_indication = 0x0011,
++	_stun_binding_success = 0x0101,
++	_stun_username = 0x0006,
++	_stun_message_integrity = 0x0008,
++	_stun_xor_mapped_address = 0x0020,
++	_stun_use_candidate = 0x0025,
++	_stun_fingerprint = 0x8028,
++};
++
++/* SCTP (RFC 9260) */
++enum
++{
++	_chunk_data = 0,
++	_chunk_init = 1,
++	_chunk_init_ack = 2,
++	_chunk_sack = 3,
++	_chunk_heartbeat = 4,
++	_chunk_heartbeat_ack = 5,
++	_chunk_abort = 6,
++	_chunk_shutdown = 7,
++	_chunk_shutdown_ack = 8,
++	_chunk_cookie_echo = 10,
++	_chunk_cookie_ack = 11,
++	_chunk_shutdown_complete = 14,
++	_chunk_reconfig = 130,
++	_chunk_forward_tsn = 192,
++
++	_data_end = 0x01,
++	_data_begin = 0x02,
++	_data_unordered = 0x04,
++
++	_parameter_state_cookie = 7,
++	_parameter_outgoing_reset = 13,
++	_parameter_reconfig_response = 16,
++	_parameter_supported_extensions = 0x8008,
++	_parameter_forward_tsn_supported = 0xC000,
++
++	/* WebRTC's payload protocols: binary and string messages, and the empty
++	ones */
++	_ppid_string = 51,
++	_ppid_binary = 53,
++	_ppid_string_empty = 56,
++	_ppid_binary_empty = 57,
++};
++
++enum
++{
++	_sctp_closed,
++	/* answered the browser's INIT; awaiting its COOKIE ECHO */
++	_sctp_cookie_sent,
++	_sctp_established,
++};
++
++struct fragment
++{
++	int used;
++	unsigned int tsn;
++	unsigned char flags;
++	int size;
++	unsigned char data[MAXIMUM_CHUNK_DATA + 128];
++};
++
++struct path
++{
++	unsigned long address;
++	unsigned short port;
++	unsigned long checked_time;
++};
++
++struct connection
++{
++	int used;
++	int peer;
++	/* the peer's name, and whether it is the host (as p2p.c logs them) */
++	char name[2 * P2P_IDENTIFIER_SIZE + 1];
++	int is_host;
++	unsigned long created_time;
++	/* ICE: this end's credentials, the addresses checks passed from, and
++	where DTLS goes (the nominated path, or the last DTLS came from) */
++	char ufrag[P2P_ICE_UFRAG_SIZE];
++	char password[P2P_ICE_PASSWORD_SIZE];
++	struct path paths[MAXIMUM_PATHS];
++	int has_destination;
++	struct path destination;
++	/* the browser's addresses, punched until it is reached */
++	struct p2p_candidate candidates[P2P_MAXIMUM_CANDIDATES];
++	int candidate_count;
++	unsigned long punch_time;
++	/* DTLS: the handle, and whether the browser's certificate was checked */
++	int dtls;
++	int secure;
++	int failed;
++	unsigned char remote_fingerprint[P2P_FINGERPRINT_SIZE];
++	/* SCTP */
++	int state;
++	unsigned int local_tag;
++	unsigned int peer_tag;
++	unsigned char cookie[16];
++	/* receiving: the cumulative TSN, which past it arrived (by TSN modulo
++	TSN_WINDOW), the highest, and whether a SACK is owed */
++	unsigned int cumulative;
++	unsigned int highest;
++	unsigned char received[TSN_WINDOW];
++	int sack_due;
++	struct fragment fragments[MAXIMUM_FRAGMENTS];
++	/* sending: the next TSN, the peer's cumulative acknowledgement, when
++	each TSN past it was sent (by TSN modulo TSN_WINDOW), and the last
++	FORWARD-TSN */
++	unsigned int next_tsn;
++	unsigned int acknowledged;
++	unsigned long sent_times[TSN_WINDOW];
++	unsigned int forwarded;
++	unsigned long forward_time;
++};
++
++static struct connection *connections[MAXIMUM_CONNECTIONS];
++static unsigned int crc32_table[256], crc32c_table[256];
++
++/* ---------- helpers */
++
++static int elapsed(unsigned long since, unsigned long time)
++{
++	return (unsigned int)(p2p_now() - since) >= (unsigned int)time;
++}
++
++static unsigned int get_long(const unsigned char *bytes)
++{
++	return (unsigned int)bytes[0] << 24 | (unsigned int)bytes[1] << 16 | (unsigned int)bytes[2] << 8 | bytes[3];
++}
++
++static unsigned short get_short(const unsigned char *bytes)
++{
++	return (unsigned short)(bytes[0] << 8 | bytes[1]);
++}
++
++static void put_long(unsigned char *bytes, unsigned int value)
++{
++	bytes[0] = (unsigned char)(value >> 24);
++	bytes[1] = (unsigned char)(value >> 16);
++	bytes[2] = (unsigned char)(value >> 8);
++	bytes[3] = (unsigned char)value;
++}
++
++static void put_short(unsigned char *bytes, unsigned short value)
++{
++	bytes[0] = (unsigned char)(value >> 8);
++	bytes[1] = (unsigned char)value;
++}
++
++/* TSNs in serial number arithmetic: a after b */
++static int tsn_after(unsigned int a, unsigned int b)
++{
++	return (int)(a - b) > 0;
++}
++
++static unsigned int random_long(void)
++{
++	unsigned int value;
++
++	posix_random_bytes(&value, sizeof(value));
++	return value;
++}
++
++static void make_tables(void)
++{
++	unsigned int index;
++
++	if (crc32_table[1])
++		return;
++	for (index = 0; index < 256; index++)
++	{
++		unsigned int crc = index, crc_c = index;
++		int bit;
++
++		for (bit = 0; bit < 8; bit++)
++		{
++			crc = crc & 1 ? 0xEDB88320 ^ crc >> 1 : crc >> 1;
++			crc_c = crc_c & 1 ? 0x82F63B78 ^ crc_c >> 1 : crc_c >> 1;
++		}
++		crc32_table[index] = crc;
++		crc32c_table[index] = crc_c;
++	}
++}
++
++/* CRC-32 (STUN's FINGERPRINT) and CRC-32C (SCTP's checksum) */
++static unsigned int checksum(const unsigned int *table, const unsigned char *data, int size)
++{
++	unsigned int crc = 0xFFFFFFFF;
++	int index;
++
++	make_tables();
++	for (index = 0; index < size; index++)
++		crc = table[(crc ^ data[index]) & 255] ^ crc >> 8;
++	return crc ^ 0xFFFFFFFF;
++}
++
++static struct connection *connection_of(int index)
++{
++	return index >= 0 && index < MAXIMUM_CONNECTIONS ? connections[index] : NULL;
++}
++
++/* ---------- ICE */
++
++/* a STUN attribute's place in a message; NULL if it has none */
++static const unsigned char *stun_attribute(const unsigned char *message, int size, int type, int *length,
++	int *offset_found)
++{
++	int offset;
++
++	for (offset = STUN_HEADER_SIZE; offset + 4 <= size; )
++	{
++		int attribute = get_short(message + offset);
++		int value_length = get_short(message + offset + 2);
++
++		if (offset + 4 + value_length > size)
++			return NULL;
++		if (attribute == type)
++		{
++			*length = value_length;
++			if (offset_found)
++				*offset_found = offset;
++			return message + offset + 4;
++		}
++		offset += 4 + ((value_length + 3) & ~3);
++	}
++	return NULL;
++}
++
++/* whether a message's MESSAGE-INTEGRITY (at offset) is right with the key */
++static int stun_integrity_right(const unsigned char *message, int offset, const char *key)
++{
++	unsigned char copy[MAXIMUM_DATAGRAM];
++	unsigned char digest[20];
++
++	if (offset > (int)sizeof(copy) - 24)
++		return 0;
++	memcpy(copy, message, (size_t)offset);
++	/* (the length as if the message ended after the integrity) */
++	put_short(copy + 2, (unsigned short)(offset + 24 - STUN_HEADER_SIZE));
++	posix_hmac_sha1(key, (int)strlen(key), copy, offset, digest);
++	return p2p_equal(digest, message + offset + 4, 20);
++}
++
++/* ends a message (its header's type and transaction, and its attributes so
++far, at size) with MESSAGE-INTEGRITY (if key) and FINGERPRINT; returns its
++size */
++static int stun_finish(unsigned char *message, int size, const char *key)
++{
++	if (key)
++	{
++		put_short(message + 2, (unsigned short)(size + 24 - STUN_HEADER_SIZE));
++		put_short(message + size, _stun_message_integrity);
++		put_short(message + size + 2, 20);
++		posix_hmac_sha1(key, (int)strlen(key), message, size, message + size + 4);
++		size += 24;
++	}
++	put_short(message + 2, (unsigned short)(size + 8 - STUN_HEADER_SIZE));
++	put_short(message + size, _stun_fingerprint);
++	put_short(message + size + 2, 4);
++	put_long(message + size + 4, checksum(crc32_table, message, size) ^ 0x5354554E);
++	return size + 8;
++}
++
++static void path_checked(struct connection *connection, unsigned long address, unsigned short port,
++	int nominated)
++{
++	struct path *oldest = &connection->paths[0];
++	int index;
++
++	for (index = 0; index < MAXIMUM_PATHS; index++)
++	{
++		struct path *path = &connection->paths[index];
++
++		if (path->address == address && path->port == port)
++		{
++			oldest = path;
++			break;
++		}
++		if ((long)(path->checked_time - oldest->checked_time) < 0 || !path->address)
++			oldest = path;
++	}
++	oldest->address = address;
++	oldest->port = port;
++	oldest->checked_time = p2p_now() | 1;
++	if (nominated || !connection->has_destination)
++	{
++		connection->destination = *oldest;
++		connection->has_destination = 1;
++	}
++}
++
++/* a browser's connectivity check: answered if it has a connection's
++credentials */
++static void binding_request(const unsigned char *message, int size, unsigned long address, unsigned short port)
++{
++	const unsigned char *username;
++	unsigned char answer[128];
++	int length, integrity_length, integrity_offset, separator;
++	int answer_size;
++	int index;
++
++	username = stun_attribute(message, size, _stun_username, &length, NULL);
++	if (!username || !stun_attribute(message, size, _stun_message_integrity, &integrity_length,
++		&integrity_offset) || integrity_length != 20)
++	{
++		return;
++	}
++	/* (this end's ufrag, a colon, the browser's) */
++	for (separator = 0; separator < length && username[separator] != ':'; separator++)
++		;
++	for (index = 0; index < MAXIMUM_CONNECTIONS; index++)
++	{
++		struct connection *connection = connections[index];
++		int nominated;
++
++		if (!connection || connection->peer < 0 || (int)strlen(connection->ufrag) != separator ||
++			memcmp(connection->ufrag, username, (size_t)separator))
++		{
++			continue;
++		}
++		if (!stun_integrity_right(message, integrity_offset, connection->password))
++			return;
++		nominated = stun_attribute(message, size, _stun_use_candidate, &length, NULL) != NULL;
++		path_checked(connection, address, port, nominated);
++		/* the answer: the address it came from, sealed with the password */
++		memset(answer, 0, STUN_HEADER_SIZE);
++		put_short(answer, _stun_binding_success);
++		memcpy(answer + 4, message + 4, 16);
++		answer_size = STUN_HEADER_SIZE;
++		put_short(answer + answer_size, _stun_xor_mapped_address);
++		put_short(answer + answer_size + 2, 8);
++		answer[answer_size + 4] = 0;
++		answer[answer_size + 5] = 1;
++		{
++			unsigned char raw[6];
++			int byte;
++
++			memcpy(raw, &port, 2);
++			memcpy(raw + 2, &address, 4);
++			for (byte = 0; byte < 6; byte++)
++				answer[answer_size + 6 + byte] = (unsigned char)(raw[byte] ^ message[4 + (byte < 2 ? byte : byte - 2)]);
++		}
++		answer_size += 12;
++		answer_size = stun_finish(answer, answer_size, connection->password);
++		p2p_tunnel_send(address, port, answer, answer_size);
++		return;
++	}
++}
++
++static void punch(struct connection *connection)
++{
++	unsigned char indication[STUN_HEADER_SIZE + 8];
++	int size;
++	int index;
++
++	memset(indication, 0, STUN_HEADER_SIZE);
++	put_short(indication, _stun_binding_indication);
++	put_long(indication + 4, STUN_COOKIE);
++	posix_random_bytes(indication + 8, 12);
++	size = stun_finish(indication, STUN_HEADER_SIZE, NULL);
++	for (index = 0; index < connection->candidate_count; index++)
++		p2p_tunnel_send(connection->candidates[index].address, connection->candidates[index].port, indication, size);
++	connection->punch_time = p2p_now();
++}
++
++/* ---------- DTLS */
++
++static void dtls_flush(struct connection *connection)
++{
++	unsigned char datagram[MAXIMUM_DATAGRAM];
++	int size;
++
++	while ((size = posix_dtls_output(connection->dtls, datagram, sizeof(datagram))) > 0)
++	{
++		if (connection->has_destination)
++			p2p_tunnel_send(connection->destination.address, connection->destination.port, datagram, size);
++	}
++}
++
++static void connection_fail(struct connection *connection, const char *reason)
++{
++	if (!connection->failed)
++		platform_log("Internet play: WebRTC with %s %s: %s", connection->is_host ? "host" : "player", connection->name,
++			reason);
++	connection->failed = 1;
++	connection->state = _sctp_closed;
++}
++
++/* ---------- SCTP: what this end sends */
++
++/* one SCTP packet: the common header, then the chunks (already in packet
++past it, size bytes in all) */
++static void sctp_send_packet(struct connection *connection, unsigned char *packet, int size, unsigned int tag)
++{
++	unsigned int crc;
++
++	put_short(packet, SCTP_PORT);
++	put_short(packet + 2, SCTP_PORT);
++	put_long(packet + 4, tag);
++	put_long(packet + 8, 0);
++	/* (CRC-32C, its bytes in the order computed) */
++	crc = checksum(crc32c_table, packet, size);
++	packet[8] = (unsigned char)crc;
++	packet[9] = (unsigned char)(crc >> 8);
++	packet[10] = (unsigned char)(crc >> 16);
++	packet[11] = (unsigned char)(crc >> 24);
++	posix_dtls_send(connection->dtls, packet, size);
++	dtls_flush(connection);
++}
++
++/* a packet of a single chunk */
++static void sctp_send_chunk(struct connection *connection, int type, int flags, const unsigned char *value,
++	int length)
++{
++	unsigned char packet[12 + 4 + MAXIMUM_CHUNK_DATA + 64];
++	int padded = (length + 3) & ~3;
++
++	if (length > (int)sizeof(packet) - 16)
++		return;
++	packet[12] = (unsigned char)type;
++	packet[13] = (unsigned char)flags;
++	put_short(packet + 14, (unsigned short)(4 + length));
++	memcpy(packet + 16, value, (size_t)length);
++	memset(packet + 16 + length, 0, (size_t)(padded - length));
++	sctp_send_packet(connection, packet, 16 + padded, connection->peer_tag);
++}
++
++static void sctp_send_sack(struct connection *connection)
++{
++	unsigned char value[12 + 4 * MAXIMUM_GAP_BLOCKS];
++	int blocks = 0;
++	unsigned int tsn;
++
++	put_long(value, connection->cumulative);
++	put_long(value + 4, RECEIVE_WINDOW);
++	/* the runs received past the cumulative TSN */
++	for (tsn = connection->cumulative + 1; !tsn_after(tsn, connection->highest) && blocks < MAXIMUM_GAP_BLOCKS; tsn++)
++	{
++		unsigned int start;
++
++		if (!connection->received[tsn % TSN_WINDOW])
++			continue;
++		start = tsn;
++		while (!tsn_after(tsn + 1, connection->highest) && connection->received[(tsn + 1) % TSN_WINDOW])
++			tsn++;
++		put_short(value + 12 + blocks * 4, (unsigned short)(start - connection->cumulative));
++		put_short(value + 14 + blocks * 4, (unsigned short)(tsn - connection->cumulative));
++		blocks++;
++	}
++	put_short(value + 8, (unsigned short)blocks);
++	put_short(value + 10, 0);
++	sctp_send_chunk(connection, _chunk_sack, 0, value, 12 + blocks * 4);
++	connection->sack_due = 0;
++}
++
++/* a message on the channel (stream 0, unordered), split as needed */
++static void sctp_send_message(struct connection *connection, const unsigned char *data, int size)
++{
++	unsigned char value[12 + MAXIMUM_CHUNK_DATA];
++	int offset = 0;
++
++	if (connection->state != _sctp_established || size <= 0 || size > MAXIMUM_MESSAGE)
++		return;
++	/* (the peer far behind: lost, until FORWARD-TSN catches up) */
++	if (connection->next_tsn - connection->acknowledged >= TSN_WINDOW - 4)
++		return;
++	while (offset < size)
++	{
++		int length = size - offset > MAXIMUM_CHUNK_DATA ? MAXIMUM_CHUNK_DATA : size - offset;
++		int flags = _data_unordered | (offset == 0 ? _data_begin : 0) | (offset + length == size ? _data_end : 0);
++		unsigned int tsn = connection->next_tsn++;
++
++		put_long(value, tsn);
++		put_short(value + 4, 0);
++		put_short(value + 6, 0);
++		put_long(value + 8, _ppid_binary);
++		memcpy(value + 12, data + offset, (size_t)length);
++		connection->sent_times[tsn % TSN_WINDOW] = p2p_now();
++		sctp_send_chunk(connection, _chunk_data, flags, value, 12 + length);
++		offset += length;
++	}
++}
++
++/* what this end sent and the peer has not acknowledged in ABANDON_TIME is
++given up: FORWARD-TSN moves the peer's cumulative TSN past it */
++static void sctp_forward(struct connection *connection)
++{
++	unsigned int last = connection->acknowledged;
++	unsigned char value[4];
++
++	while (tsn_after(connection->next_tsn, last + 1) && elapsed(connection->sent_times[(last + 1) % TSN_WINDOW],
++		ABANDON_TIME))
++	{
++		last++;
++	}
++	if (!tsn_after(last, connection->acknowledged))
++		return;
++	if (last == connection->forwarded && !elapsed(connection->forward_time, FORWARD_INTERVAL))
++		return;
++	put_long(value, last);
++	sctp_send_chunk(connection, _chunk_forward_tsn, 0, value, 4);
++	connection->forwarded = last;
++	connection->forward_time = p2p_now();
++}
++
++/* ---------- SCTP: what the peer sends */
++
++static void deliver(struct connection *connection, const unsigned char *data, int size)
++{
++	struct path const *from = &connection->destination;
++
++	if (connection->peer >= 0 && size > 0)
++		p2p_tunnel_packet(data, size, from->address, from->port);
++}
++
++/* a message's fragments, once all have come (unordered: consecutive TSNs) */
++static void join_fragments(struct connection *connection)
++{
++	int index;
++
++	for (index = 0; index < MAXIMUM_FRAGMENTS; index++)
++	{
++		struct fragment *first = &connection->fragments[index];
++		unsigned char message[MAXIMUM_MESSAGE];
++		int parts[MAXIMUM_FRAGMENTS];
++		int count = 0;
++		int size = 0;
++		unsigned int tsn;
++
++		if (!first->used || !(first->flags & _data_begin))
++			continue;
++		for (tsn = first->tsn; count < MAXIMUM_FRAGMENTS; tsn++)
++		{
++			int found;
++
++			for (found = 0; found < MAXIMUM_FRAGMENTS; found++)
++			{
++				if (connection->fragments[found].used && connection->fragments[found].tsn == tsn)
++					break;
++			}
++			if (found == MAXIMUM_FRAGMENTS)
++				break;
++			parts[count++] = found;
++			if (connection->fragments[found].flags & _data_end)
++				break;
++		}
++		if (!count || !(connection->fragments[parts[count - 1]].flags & _data_end))
++			continue;
++		{
++			int part;
++			int fits = 1;
++
++			for (part = 0; part < count; part++)
++			{
++				struct fragment *fragment = &connection->fragments[parts[part]];
++
++				if (size + fragment->size > (int)sizeof(message))
++					fits = 0;
++				else
++					memcpy(message + size, fragment->data, (size_t)fragment->size);
++				size += fragment->size;
++				fragment->used = 0;
++			}
++			if (fits)
++				deliver(connection, message, size);
++		}
++	}
++}
++
++static void data_received(struct connection *connection, int flags, const unsigned char *value, int length)
++{
++	unsigned int tsn;
++	unsigned int ppid;
++	const unsigned char *data = value + 12;
++	int size = length - 12;
++
++	if (length < 12)
++		return;
++	tsn = get_long(value);
++	ppid = get_long(value + 8);
++	connection->sack_due = 1;
++	if (!tsn_after(tsn, connection->cumulative) || tsn - connection->cumulative > TSN_WINDOW - 1 ||
++		connection->received[tsn % TSN_WINDOW])
++	{
++		/* (again, or too far ahead: acknowledged as it stands) */
++		return;
++	}
++	connection->received[tsn % TSN_WINDOW] = 1;
++	if (tsn_after(tsn, connection->highest))
++		connection->highest = tsn;
++	while (connection->received[(connection->cumulative + 1) % TSN_WINDOW] &&
++		tsn_after(connection->highest + 1, connection->cumulative + 1))
++	{
++		connection->cumulative++;
++		connection->received[connection->cumulative % TSN_WINDOW] = 0;
++	}
++	/* (the channel's messages: binary, or strings, which none of this
++	version's sends; not the channel's control messages) */
++	if (ppid != _ppid_binary && ppid != _ppid_binary_empty && ppid != _ppid_string && ppid != _ppid_string_empty)
++		return;
++	if (ppid == _ppid_binary_empty || ppid == _ppid_string_empty)
++		size = 0;
++	if ((flags & (_data_begin | _data_end)) == (_data_begin | _data_end))
++	{
++		deliver(connection, data, size);
++		return;
++	}
++	{
++		struct fragment *slot = NULL;
++		int index;
++
++		for (index = 0; index < MAXIMUM_FRAGMENTS && !slot; index++)
++		{
++			if (!connection->fragments[index].used)
++				slot = &connection->fragments[index];
++		}
++		/* (full: the oldest goes, a message lost) */
++		if (!slot)
++		{
++			slot = &connection->fragments[0];
++			for (index = 1; index < MAXIMUM_FRAGMENTS; index++)
++			{
++				if (tsn_after(slot->tsn, connection->fragments[index].tsn))
++					slot = &connection->fragments[index];
++			}
++		}
++		if (size > (int)sizeof(slot->data))
++			return;
++		slot->used = 1;
++		slot->tsn = tsn;
++		slot->flags = (unsigned char)flags;
++		slot->size = size;
++		memcpy(slot->data, data, (size_t)size);
++		join_fragments(connection);
++	}
++}
++
++static void forward_tsn_received(struct connection *connection, const unsigned char *value, int length)
++{
++	unsigned int forward;
++	int index;
++
++	if (length < 4)
++		return;
++	forward = get_long(value);
++	connection->sack_due = 1;
++	if (!tsn_after(forward, connection->cumulative))
++		return;
++	if (forward - connection->cumulative >= TSN_WINDOW)
++		memset(connection->received, 0, sizeof(connection->received));
++	else
++	{
++		while (tsn_after(forward, connection->cumulative))
++		{
++			connection->cumulative++;
++			connection->received[connection->cumulative % TSN_WINDOW] = 0;
++		}
++	}
++	connection->cumulative = forward;
++	if (tsn_after(forward, connection->highest))
++		connection->highest = forward;
++	while (connection->received[(connection->cumulative + 1) % TSN_WINDOW] &&
++		tsn_after(connection->highest + 1, connection->cumulative + 1))
++	{
++		connection->cumulative++;
++		connection->received[connection->cumulative % TSN_WINDOW] = 0;
++	}
++	/* (what is past it of a message given up will never be whole) */
++	for (index = 0; index < MAXIMUM_FRAGMENTS; index++)
++	{
++		if (connection->fragments[index].used && !tsn_after(connection->fragments[index].tsn, forward))
++			connection->fragments[index].used = 0;
++	}
++}
++
++static void sack_received(struct connection *connection, const unsigned char *value, int length)
++{
++	unsigned int cumulative;
++
++	if (length < 12)
++		return;
++	cumulative = get_long(value);
++	if (tsn_after(cumulative, connection->acknowledged) && !tsn_after(cumulative, connection->next_tsn - 1))
++		connection->acknowledged = cumulative;
++}
++
++static void init_received(struct connection *connection, const unsigned char *value, int length)
++{
++	unsigned char answer[20 + 4 + 16 + 4 + 2 + 2 + 4];
++	unsigned int tag;
++	int size = 0;
++	int outbound, inbound;
++
++	if (length < 16)
++		return;
++	tag = get_long(value);
++	if (!tag)
++		return;
++	/* a new association (the first, or the peer's after a restart) */
++	if (connection->state != _sctp_cookie_sent || tag != connection->peer_tag)
++	{
++		connection->peer_tag = tag;
++		connection->local_tag = random_long() | 1;
++		posix_random_bytes(connection->cookie, sizeof(connection->cookie));
++		connection->cumulative = get_long(value + 12) - 1;
++		connection->highest = connection->cumulative;
++		memset(connection->received, 0, sizeof(connection->received));
++		memset(connection->fragments, 0, sizeof(connection->fragments));
++		connection->next_tsn = random_long();
++		connection->acknowledged = connection->next_tsn - 1;
++		connection->forwarded = connection->acknowledged;
++		connection->state = _sctp_cookie_sent;
++	}
++	outbound = get_short(value + 8);
++	inbound = get_short(value + 10);
++	put_long(answer + size, connection->local_tag);
++	put_long(answer + size + 4, RECEIVE_WINDOW);
++	put_short(answer + size + 8, (unsigned short)(inbound < MAXIMUM_STREAMS ? inbound : MAXIMUM_STREAMS));
++	put_short(answer + size + 10, (unsigned short)(outbound < MAXIMUM_STREAMS ? outbound : MAXIMUM_STREAMS));
++	put_long(answer + size + 12, connection->next_tsn);
++	size += 16;
++	/* the state cookie, which its COOKIE ECHO returns */
++	put_short(answer + size, _parameter_state_cookie);
++	put_short(answer + size + 2, 4 + sizeof(connection->cookie));
++	memcpy(answer + size + 4, connection->cookie, sizeof(connection->cookie));
++	size += 4 + sizeof(connection->cookie);
++	/* FORWARD-TSN and RE-CONFIG (which WebRTC's SCTP requires) */
++	put_short(answer + size, _parameter_supported_extensions);
++	put_short(answer + size + 2, 6);
++	answer[size + 4] = _chunk_forward_tsn;
++	answer[size + 5] = _chunk_reconfig;
++	answer[size + 6] = 0;
++	answer[size + 7] = 0;
++	size += 8;
++	put_short(answer + size, _parameter_forward_tsn_supported);
++	put_short(answer + size + 2, 4);
++	size += 4;
++	sctp_send_chunk(connection, _chunk_init_ack, 0, answer, size);
++}
++
++static void cookie_echo_received(struct connection *connection, const unsigned char *value, int length)
++{
++	if (length != (int)sizeof(connection->cookie) || connection->state == _sctp_closed ||
++		!p2p_equal(value, connection->cookie, sizeof(connection->cookie)))
++	{
++		return;
++	}
++	if (connection->state != _sctp_established)
++		platform_log("Internet play: WebRTC connected to %s %s's browser", connection->is_host ? "host" : "player",
++			connection->name);
++	connection->state = _sctp_established;
++	sctp_send_chunk(connection, _chunk_cookie_ack, 0, NULL, 0);
++}
++
++/* a stream reset (a channel closing): done, as the channel is the only one */
++static void reconfig_received(struct connection *connection, const unsigned char *value, int length)
++{
++	int offset;
++
++	for (offset = 0; offset + 4 <= length; )
++	{
++		int type = get_short(value + offset);
++		int parameter_length = get_short(value + offset + 2);
++
++		if (parameter_length < 4 || offset + parameter_length > length)
++			return;
++		if (type == _parameter_outgoing_reset && parameter_length >= 16)
++		{
++			unsigned char answer[12];
++
++			put_short(answer, _parameter_reconfig_response);
++			put_short(answer + 2, 12);
++			memcpy(answer + 4, value + offset + 4, 4);
++			/* Success - Performed */
++			put_long(answer + 8, 1);
++			sctp_send_chunk(connection, _chunk_reconfig, 0, answer, sizeof(answer));
++		}
++		offset += (parameter_length + 3) & ~3;
++	}
++}
++
++static void sctp_received(struct connection *connection, const unsigned char *packet, int size)
++{
++	unsigned char copy[MAXIMUM_DATAGRAM];
++	unsigned int crc;
++	unsigned int tag;
++	int offset;
++
++	if (size < 16 || size > (int)sizeof(copy))
++		return;
++	memcpy(copy, packet, (size_t)size);
++	memset(copy + 8, 0, 4);
++	crc = checksum(crc32c_table, copy, size);
++	if (packet[8] != (unsigned char)crc || packet[9] != (unsigned char)(crc >> 8) ||
++		packet[10] != (unsigned char)(crc >> 16) || packet[11] != (unsigned char)(crc >> 24))
++	{
++		return;
++	}
++	tag = get_long(packet + 4);
++	for (offset = 12; offset + 4 <= size; )
++	{
++		int type = packet[offset];
++		int flags = packet[offset + 1];
++		int length = get_short(packet + offset + 2);
++		const unsigned char *value = packet + offset + 4;
++
++		if (length < 4 || offset + length > size)
++			break;
++		/* (an INIT has no tag yet; everything else, this end's) */
++		if (type == _chunk_init)
++		{
++			if (tag == 0)
++				init_received(connection, value, length - 4);
++			break;
++		}
++		if (tag != connection->local_tag || connection->state == _sctp_closed)
++			break;
++		switch (type)
++		{
++		case _chunk_cookie_echo:
++			cookie_echo_received(connection, value, length - 4);
++			break;
++		case _chunk_data:
++			if (connection->state == _sctp_established)
++				data_received(connection, flags, value, length - 4);
++			break;
++		case _chunk_sack:
++			sack_received(connection, value, length - 4);
++			break;
++		case _chunk_forward_tsn:
++			forward_tsn_received(connection, value, length - 4);
++			break;
++		case _chunk_heartbeat:
++			sctp_send_chunk(connection, _chunk_heartbeat_ack, 0, value, length - 4);
++			break;
++		case _chunk_reconfig:
++			reconfig_received(connection, value, length - 4);
++			break;
++		case _chunk_shutdown:
++			sctp_send_chunk(connection, _chunk_shutdown_ack, 0, NULL, 0);
++			connection_fail(connection, "the browser closed the connection");
++			return;
++		case _chunk_abort:
++		case _chunk_shutdown_complete:
++			connection_fail(connection, "the browser closed the connection");
++			return;
++		}
++		/* (a chunk may have closed it) */
++		if (connection->state == _sctp_closed)
++			return;
++		offset += (length + 3) & ~3;
++	}
++}
++
++/* ---------- the connection's DTLS records */
++
++static void connection_receive(struct connection *connection)
++{
++	unsigned char record[MAXIMUM_DATAGRAM];
++	int size;
++
++	while (!connection->failed &&
++		(size = posix_dtls_receive(connection->dtls, (posix_ulong)p2p_now(), record, sizeof(record))) != 0)
++	{
++		if (size < 0)
++		{
++			connection_fail(connection, "DTLS failed or closed");
++			break;
++		}
++		if (!connection->secure)
++		{
++			unsigned char fingerprint[P2P_FINGERPRINT_SIZE];
++
++			if (!posix_dtls_peer_fingerprint(connection->dtls, fingerprint) ||
++				!p2p_equal(fingerprint, connection->remote_fingerprint, P2P_FINGERPRINT_SIZE))
++			{
++				connection_fail(connection, "its certificate is not the one it signalled");
++				break;
++			}
++			connection->secure = 1;
++		}
++		sctp_received(connection, record, size);
++	}
++	/* the handshake's own, and whatever the records' answers sent */
++	if (!connection->secure && !connection->failed)
++	{
++		unsigned char fingerprint[P2P_FINGERPRINT_SIZE];
++
++		if (posix_dtls_peer_fingerprint(connection->dtls, fingerprint))
++		{
++			if (p2p_equal(fingerprint, connection->remote_fingerprint, P2P_FINGERPRINT_SIZE))
++				connection->secure = 1;
++			else
++				connection_fail(connection, "its certificate is not the one it signalled");
++		}
++	}
++	if (connection->sack_due && connection->state == _sctp_established)
++		sctp_send_sack(connection);
++	dtls_flush(connection);
++}
++
++/* ---------- p2p.c's side */
++
++int p2p_webrtc_describe(const unsigned char *identifier, int proven, struct p2p_webrtc *local,
++	struct p2p_candidate *candidates, int maximum_count)
++{
++	(void)identifier;
++	(void)proven;
++	memset(local, 0, sizeof(*local));
++	/* (no certificate: no browsers, only other native builds) */
++	local->kind = posix_dtls_fingerprint(local->fingerprint) ? _p2p_webrtc_native : _p2p_webrtc_none;
++	return p2p_local_candidates(candidates, maximum_count);
++}
++
++int p2p_webrtc_ready(void)
++{
++	return 1;
++}
++
++void p2p_webrtc_new_request(void)
++{
++}
++
++int p2p_webrtc_offered(int index, int peer, const unsigned char *secret, const struct p2p_webrtc *remote,
++	const struct p2p_candidate *candidates, int count, int is_host)
++{
++	struct connection *connection = connection_of(index);
++	int candidate;
++
++	if (!connection)
++	{
++		unsigned char fingerprint[P2P_FINGERPRINT_SIZE];
++
++		/* another native build's tunnel is plain UDP */
++		if (remote->kind != _p2p_webrtc_browser || !posix_dtls_fingerprint(fingerprint))
++			return -1;
++		for (index = 0; index < MAXIMUM_CONNECTIONS && connections[index]; index++)
++			;
++		if (index == MAXIMUM_CONNECTIONS)
++			return -1;
++		connection = calloc(1, sizeof(*connection));
++		if (!connection)
++			return -1;
++		connection->dtls = posix_dtls_open();
++		if (connection->dtls < 0)
++		{
++			free(connection);
++			return -1;
++		}
++		connection->used = 1;
++		connection->peer = peer;
++		connection->created_time = p2p_now();
++		p2p_webrtc_credentials(secret, connection->ufrag, connection->password);
++		memcpy(connection->remote_fingerprint, remote->fingerprint, P2P_FINGERPRINT_SIZE);
++		connections[index] = connection;
++	}
++	p2p_peer_name(peer, connection->name);
++	connection->is_host = is_host;
++	for (candidate = 0; candidate < count; candidate++)
++	{
++		int known;
++
++		for (known = 0; known < connection->candidate_count; known++)
++		{
++			if (connection->candidates[known].address == candidates[candidate].address &&
++				connection->candidates[known].port == candidates[candidate].port)
++				break;
++		}
++		if (known == connection->candidate_count && connection->candidate_count < P2P_MAXIMUM_CANDIDATES)
++			connection->candidates[connection->candidate_count++] = candidates[candidate];
++	}
++	return index;
++}
++
++void p2p_webrtc_close(int index)
++{
++	struct connection *connection = connection_of(index);
++
++	if (!connection)
++		return;
++	/* (the browser learns at once, not when its checks lapse) */
++	if (connection->state == _sctp_established)
++		sctp_send_chunk(connection, _chunk_abort, 0, NULL, 0);
++	/* (let go of in the next update: this may be called from within its
++	own delivery) */
++	connection->peer = -1;
++}
++
++void p2p_webrtc_send(int index, const void *packet, int size)
++{
++	struct connection *connection = connection_of(index);
++
++	if (connection && connection->peer >= 0 && connection->secure && !connection->failed)
++		sctp_send_message(connection, packet, size);
++}
++
++int p2p_webrtc_received(const unsigned char *packet, int size, unsigned long address, unsigned short port)
++{
++	int index;
++
++	if (size < 1)
++		return 0;
++	/* an ICE check (a STUN request; answers are p2p.c's STUN servers') */
++	if (size >= STUN_HEADER_SIZE && packet[0] == 0 && packet[1] == 1 && get_long(packet + 4) == STUN_COOKIE)
++	{
++		if (STUN_HEADER_SIZE + get_short(packet + 2) == size)
++			binding_request(packet, size, address, port);
++		return 1;
++	}
++	/* DTLS (RFC 7983): from a path a connection's checks passed on */
++	if (packet[0] < 20 || packet[0] > 63)
++		return 0;
++	for (index = 0; index < MAXIMUM_CONNECTIONS; index++)
++	{
++		struct connection *connection = connections[index];
++		int path;
++
++		if (!connection || connection->peer < 0 || connection->failed)
++			continue;
++		for (path = 0; path < MAXIMUM_PATHS; path++)
++		{
++			if (connection->paths[path].address == address && connection->paths[path].port == port &&
++				connection->paths[path].checked_time && !elapsed(connection->paths[path].checked_time, PATH_TIME))
++			{
++				break;
++			}
++		}
++		if (path == MAXIMUM_PATHS)
++			continue;
++		/* (the browser's DTLS goes where it came from) */
++		connection->destination = connection->paths[path];
++		connection->has_destination = 1;
++		posix_dtls_input(connection->dtls, packet, size);
++		connection_receive(connection);
++		return 1;
++	}
++	return 1;
++}
++
++int p2p_webrtc_update(void)
++{
++	int busy = 0;
++	int index;
++
++	for (index = 0; index < MAXIMUM_CONNECTIONS; index++)
++	{
++		struct connection *connection = connections[index];
++
++		if (!connection)
++			continue;
++		if (connection->peer < 0)
++		{
++			posix_dtls_close(connection->dtls);
++			free(connection);
++			connections[index] = NULL;
++			continue;
++		}
++		busy = 1;
++		if (connection->failed)
++			continue;
++		/* (the handshake's retransmissions) */
++		connection_receive(connection);
++		if (connection->state == _sctp_established)
++			sctp_forward(connection);
++		else if (!elapsed(connection->created_time, PUNCH_TIME) && elapsed(connection->punch_time, PUNCH_INTERVAL))
++			punch(connection);
++	}
++	return busy;
++}
 diff --git a/port/linux/src/port_config.c b/port/linux/src/port_config.c
-index 926df238..52e23e5a 100644
+index 926df238..6b2955c9 100644
 --- a/port/linux/src/port_config.c
 +++ b/port/linux/src/port_config.c
 @@ -65,6 +65,18 @@ struct config_setting
@@ -7718,7 +9948,26 @@ index 926df238..52e23e5a 100644
  
  	{ "audio.enabled", _config_boolean, "true", "HALO_NO_AUDIO", _environment_set_is_false, _platform_all,
  		"Play sound." },
-@@ -422,6 +459,51 @@ static const struct config_setting config_settings[] =
+@@ -372,6 +409,18 @@ static const struct config_setting config_settings[] =
+ 		"machines of twice it), to test the netcode as over the internet; 0 none." },
+ 	{ "debug.network_loss", _config_real, "0.0", "HALO_NETWORK_LOSS", _environment_value, _platform_all,
+ 		"Percent of datagrams received that are dropped, for the same; 0 none." },
++	{ "debug.network_corrupt", _config_real, "0.0", "HALO_NETWORK_CORRUPT", _environment_value, _platform_all,
++		"Percent of the datagrams received that are damaged at random, to test\n"
++		"that nothing a machine sends can crash the game; 0 none." },
++	{ "debug.network_corrupt_stream", _config_real, "0.0", "HALO_NETWORK_CORRUPT_STREAM", _environment_value,
++		_platform_all,
++		"Percent of the reads of streams that are damaged at random, for the\n"
++		"same (a damaged stream is closed, so a little goes a long way); 0 none." },
++	{ "debug.network_corrupt_after", _config_real, "0.0", "HALO_NETWORK_CORRUPT_AFTER", _environment_value,
++		_platform_all,
++		"Seconds after the start before anything is damaged, so that a game can\n"
++		"be set up and started first (a host's messages to its own client are\n"
++		"damaged too)." },
+ 	{ "debug.test_input", _config_string, "\"\"", "HALO_TEST_INPUT", _environment_value, _platform_all,
+ 		"\"bot:<seed>\" plays controller 1 with a scripted pattern (automated\n"
+ 		"network tests); \"look:<seed>\" stands still, only turning and looking\n"
+@@ -422,6 +471,51 @@ static const struct config_setting config_settings[] =
  	{ "debug.sample_seconds", _config_real, "0.0", "HALO_SAMPLE", _environment_value, _platform_android,
  		"Log where every game thread is this often, in seconds (read by the\n"
  		"app, port/android/host/host_debug.c); 0 never." },
@@ -7770,6 +10019,457 @@ index 926df238..52e23e5a 100644
  };
  
  #define NUMBER_OF_CONFIG_SETTINGS (sizeof(config_settings) / sizeof(config_settings[0]))
+diff --git a/port/linux/src/posix.h b/port/linux/src/posix.h
+index 5b07bd76..f07dacf4 100644
+--- a/port/linux/src/posix.h
++++ b/port/linux/src/posix.h
+@@ -142,6 +142,35 @@ int posix_upnp_forward_udp(unsigned short port, unsigned short preferred_port, p
+ posix_upnp_forward_udp set up; blocks */
+ void posix_upnp_stop_forwarding_udp(unsigned short external_port);
+ 
++/* ---------- DTLS for WebRTC (internet play with browsers, p2p_webrtc.c;
++posix_dtls.c, with port/third_party/mbedtls) */
++
++/* the SHA-256 of this run's certificate (made the first time: a
++self-signed ECDSA P-256 one, which WebRTC peers know by this hash) into
++fingerprint (32 bytes); 0 if it cannot be made */
++int posix_dtls_fingerprint(unsigned char *fingerprint);
++/* a DTLS 1.2 server for one peer, which asks for the peer's certificate;
++a handle, or -1 */
++int posix_dtls_open(void);
++void posix_dtls_close(int handle);
++/* a datagram that arrived from the peer (kept until read: a few at most) */
++void posix_dtls_input(int handle, const void *data, int size);
++/* the handshake's progress, and then the peer's data: the size of a record
++it sent (copied into buffer), 0 if none is waiting, or -1 if the connection
++failed or was closed. now is a clock of milliseconds (its retransmissions'
++timers) */
++int posix_dtls_receive(int handle, posix_ulong now, void *buffer, int size);
++/* sends a record of data, once the handshake is done: 1, or 0 if not (not
++done yet, or too large) */
++int posix_dtls_send(int handle, const void *data, int size);
++/* the next datagram for the peer (into buffer): its size, or 0 if none */
++int posix_dtls_output(int handle, void *buffer, int size);
++/* once the handshake is done: 1, with the SHA-256 of the peer's
++certificate in fingerprint (32 bytes); else 0 */
++int posix_dtls_peer_fingerprint(int handle, unsigned char *fingerprint);
++/* HMAC-SHA-1 (STUN's MESSAGE-INTEGRITY) into digest (20 bytes) */
++void posix_hmac_sha1(const void *key, int key_size, const void *data, int size, unsigned char *digest);
++
+ /* ---------- the process and the desktop (internet play, p2p.c) */
+ 
+ /* copies the command line argument at index (0 is the program) into buffer;
+diff --git a/port/linux/src/posix_dtls.c b/port/linux/src/posix_dtls.c
+new file mode 100644
+index 00000000..c27321e3
+--- /dev/null
++++ b/port/linux/src/posix_dtls.c
+@@ -0,0 +1,356 @@
++/*
++POSIX_DTLS.C
++
++DTLS for internet play with browsers (p2p_webrtc.c): the server end of
++WebRTC's DTLS 1.2, with Mbed TLS (port/third_party/mbedtls), over datagrams
++the caller carries (posix.h). A browser's data channel runs over it.
++
++Each run has one certificate, self-signed (ECDSA P-256), made the first time
++it is needed: the peers of a WebRTC connection know each other by their
++certificates' SHA-256 (exchanged, sealed, through internet play's
++signalling), not by a certificate authority. So the peer's certificate is
++asked for and its signature of the handshake checked, but not its chain:
++p2p_webrtc.c compares its hash with the one signalled.
++
++There are no cookies (HelloVerifyRequest): datagrams reach an endpoint only
++from an address whose ICE check passed, with the session's password.
++
++Built with the host's ABI, as the other posix_*.c.
++*/
++
++#include "posix.h"
++
++#include "mbedtls/pk.h"
++#include "mbedtls/psa_util.h"
++#include "mbedtls/sha256.h"
++#include "mbedtls/md.h"
++#include "mbedtls/ssl.h"
++#include "mbedtls/x509_crt.h"
++#include "psa/crypto.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++enum
++{
++	MAXIMUM_ENDPOINTS = 128,
++	/* datagrams kept each way */
++	QUEUE_LENGTH = 16,
++	MAXIMUM_DATAGRAM = 1500,
++	/* the handshake's datagrams are kept under this */
++	DTLS_MTU = 1200,
++	CERTIFICATE_SIZE = 1024,
++};
++
++struct datagram_queue
++{
++	int count;
++	int first;
++	int sizes[QUEUE_LENGTH];
++	unsigned char data[QUEUE_LENGTH][MAXIMUM_DATAGRAM];
++};
++
++struct endpoint
++{
++	int used;
++	int handshake_done;
++	int failed;
++	mbedtls_ssl_context ssl;
++	/* the clock, as of the last call (the timers'), and the timer: when it
++	was set, its intermediate and final delays (0: cancelled) */
++	unsigned long now;
++	unsigned long timer_start;
++	unsigned int timer_intermediate;
++	unsigned int timer_final;
++	struct datagram_queue input;
++	struct datagram_queue output;
++};
++
++static struct
++{
++	int tried;
++	int ready;
++	mbedtls_pk_context key;
++	mbedtls_x509_crt certificate;
++	mbedtls_ssl_config config;
++	unsigned char fingerprint[32];
++} dtls;
++
++static struct endpoint *endpoints[MAXIMUM_ENDPOINTS];
++
++static void queue_push(struct datagram_queue *queue, const void *data, int size)
++{
++	int index;
++
++	if (size <= 0 || size > MAXIMUM_DATAGRAM)
++		return;
++	/* (full: the oldest goes, as a network would lose it) */
++	if (queue->count == QUEUE_LENGTH)
++	{
++		queue->first = (queue->first + 1) % QUEUE_LENGTH;
++		queue->count--;
++	}
++	index = (queue->first + queue->count) % QUEUE_LENGTH;
++	memcpy(queue->data[index], data, (size_t)size);
++	queue->sizes[index] = size;
++	queue->count++;
++}
++
++static int queue_pop(struct datagram_queue *queue, void *buffer, int size)
++{
++	int length;
++
++	if (!queue->count)
++		return 0;
++	length = queue->sizes[queue->first];
++	if (length > size)
++		length = size;
++	memcpy(buffer, queue->data[queue->first], (size_t)length);
++	queue->first = (queue->first + 1) % QUEUE_LENGTH;
++	queue->count--;
++	return length;
++}
++
++/* ---------- Mbed TLS's callbacks */
++
++static int bio_send(void *context, const unsigned char *data, size_t size)
++{
++	struct endpoint *endpoint = context;
++
++	queue_push(&endpoint->output, data, (int)size);
++	return (int)size;
++}
++
++static int bio_receive(void *context, unsigned char *buffer, size_t size)
++{
++	struct endpoint *endpoint = context;
++	int length = queue_pop(&endpoint->input, buffer, (int)size);
++
++	return length ? length : MBEDTLS_ERR_SSL_WANT_READ;
++}
++
++static void timer_set(void *context, uint32_t intermediate, uint32_t final)
++{
++	struct endpoint *endpoint = context;
++
++	endpoint->timer_start = endpoint->now;
++	endpoint->timer_intermediate = intermediate;
++	endpoint->timer_final = final;
++}
++
++static int timer_get(void *context)
++{
++	struct endpoint *endpoint = context;
++	unsigned int elapsed = (unsigned int)(endpoint->now - endpoint->timer_start);
++
++	if (!endpoint->timer_final)
++		return -1;
++	if (elapsed >= endpoint->timer_final)
++		return 2;
++	return elapsed >= endpoint->timer_intermediate ? 1 : 0;
++}
++
++/* the peer's certificate is known by its hash (p2p_webrtc.c), not its
++chain */
++static int verify_any(void *context, mbedtls_x509_crt *certificate, int depth, uint32_t *flags)
++{
++	(void)context;
++	(void)certificate;
++	(void)depth;
++	*flags = 0;
++	return 0;
++}
++
++/* ---------- the run's certificate */
++
++static int make_certificate(void)
++{
++	static const unsigned char serial[] = { 0x4F, 0x70, 0x65, 0x6E, 0x43, 0x45 };
++	mbedtls_x509write_cert writer;
++	unsigned char buffer[CERTIFICATE_SIZE];
++	int size;
++
++	if (psa_crypto_init() != PSA_SUCCESS)
++		return 0;
++	mbedtls_pk_init(&dtls.key);
++	mbedtls_x509_crt_init(&dtls.certificate);
++	if (mbedtls_pk_setup(&dtls.key, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY)) != 0 ||
++		mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(dtls.key), mbedtls_psa_get_random,
++		MBEDTLS_PSA_RANDOM_STATE) != 0)
++	{
++		return 0;
++	}
++	mbedtls_x509write_crt_init(&writer);
++	mbedtls_x509write_crt_set_version(&writer, MBEDTLS_X509_CRT_VERSION_3);
++	mbedtls_x509write_crt_set_md_alg(&writer, MBEDTLS_MD_SHA256);
++	mbedtls_x509write_crt_set_subject_key(&writer, &dtls.key);
++	mbedtls_x509write_crt_set_issuer_key(&writer, &dtls.key);
++	size = -1;
++	if (mbedtls_x509write_crt_set_subject_name(&writer, "CN=OpenCE") == 0 &&
++		mbedtls_x509write_crt_set_issuer_name(&writer, "CN=OpenCE") == 0 &&
++		mbedtls_x509write_crt_set_serial_raw(&writer, (unsigned char *)serial, sizeof(serial)) == 0 &&
++		mbedtls_x509write_crt_set_validity(&writer, "20240101000000", "20491231235959") == 0)
++	{
++		size = mbedtls_x509write_crt_der(&writer, buffer, sizeof(buffer), mbedtls_psa_get_random,
++			MBEDTLS_PSA_RANDOM_STATE);
++	}
++	mbedtls_x509write_crt_free(&writer);
++	/* (written at the end of the buffer) */
++	if (size <= 0 || mbedtls_x509_crt_parse_der(&dtls.certificate, buffer + sizeof(buffer) - size,
++		(size_t)size) != 0)
++	{
++		return 0;
++	}
++	mbedtls_sha256(buffer + sizeof(buffer) - size, (size_t)size, dtls.fingerprint, 0);
++	mbedtls_ssl_config_init(&dtls.config);
++	if (mbedtls_ssl_config_defaults(&dtls.config, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_DATAGRAM,
++		MBEDTLS_SSL_PRESET_DEFAULT) != 0)
++	{
++		return 0;
++	}
++	/* WebRTC's: DTLS 1.2 (a browser offering 1.3 too takes it) */
++	mbedtls_ssl_conf_min_tls_version(&dtls.config, MBEDTLS_SSL_VERSION_TLS1_2);
++	mbedtls_ssl_conf_max_tls_version(&dtls.config, MBEDTLS_SSL_VERSION_TLS1_2);
++	mbedtls_ssl_conf_rng(&dtls.config, mbedtls_psa_get_random, MBEDTLS_PSA_RANDOM_STATE);
++	mbedtls_ssl_conf_authmode(&dtls.config, MBEDTLS_SSL_VERIFY_OPTIONAL);
++	mbedtls_ssl_conf_verify(&dtls.config, verify_any, NULL);
++	mbedtls_ssl_conf_dtls_cookies(&dtls.config, NULL, NULL, NULL);
++	return mbedtls_ssl_conf_own_cert(&dtls.config, &dtls.certificate, &dtls.key) == 0;
++}
++
++int posix_dtls_fingerprint(unsigned char *fingerprint)
++{
++	if (!dtls.tried)
++	{
++		dtls.tried = 1;
++		dtls.ready = make_certificate();
++	}
++	if (dtls.ready)
++		memcpy(fingerprint, dtls.fingerprint, sizeof(dtls.fingerprint));
++	return dtls.ready;
++}
++
++/* ---------- endpoints */
++
++int posix_dtls_open(void)
++{
++	unsigned char unused[32];
++	struct endpoint *endpoint;
++	int handle;
++
++	if (!posix_dtls_fingerprint(unused))
++		return -1;
++	for (handle = 0; handle < MAXIMUM_ENDPOINTS && endpoints[handle]; handle++)
++		;
++	if (handle == MAXIMUM_ENDPOINTS)
++		return -1;
++	endpoint = calloc(1, sizeof(*endpoint));
++	if (!endpoint)
++		return -1;
++	mbedtls_ssl_init(&endpoint->ssl);
++	if (mbedtls_ssl_setup(&endpoint->ssl, &dtls.config) != 0)
++	{
++		mbedtls_ssl_free(&endpoint->ssl);
++		free(endpoint);
++		return -1;
++	}
++	mbedtls_ssl_set_bio(&endpoint->ssl, endpoint, bio_send, bio_receive, NULL);
++	mbedtls_ssl_set_timer_cb(&endpoint->ssl, endpoint, timer_set, timer_get);
++	mbedtls_ssl_set_mtu(&endpoint->ssl, DTLS_MTU);
++	endpoint->used = 1;
++	endpoints[handle] = endpoint;
++	return handle;
++}
++
++static struct endpoint *endpoint_of(int handle)
++{
++	return handle >= 0 && handle < MAXIMUM_ENDPOINTS ? endpoints[handle] : NULL;
++}
++
++void posix_dtls_close(int handle)
++{
++	struct endpoint *endpoint = endpoint_of(handle);
++
++	if (!endpoint)
++		return;
++	mbedtls_ssl_free(&endpoint->ssl);
++	free(endpoint);
++	endpoints[handle] = NULL;
++}
++
++void posix_dtls_input(int handle, const void *data, int size)
++{
++	struct endpoint *endpoint = endpoint_of(handle);
++
++	if (endpoint)
++		queue_push(&endpoint->input, data, size);
++}
++
++int posix_dtls_receive(int handle, posix_ulong now, void *buffer, int size)
++{
++	struct endpoint *endpoint = endpoint_of(handle);
++	int result;
++
++	if (!endpoint || endpoint->failed)
++		return -1;
++	endpoint->now = now;
++	if (!endpoint->handshake_done)
++	{
++		result = mbedtls_ssl_handshake(&endpoint->ssl);
++		if (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE)
++			return 0;
++		if (result != 0)
++		{
++			endpoint->failed = 1;
++			return -1;
++		}
++		endpoint->handshake_done = 1;
++	}
++	result = mbedtls_ssl_read(&endpoint->ssl, buffer, (size_t)size);
++	if (result > 0)
++		return result;
++	if (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE ||
++		result == MBEDTLS_ERR_SSL_TIMEOUT)
++	{
++		return 0;
++	}
++	/* (closed, or failed) */
++	endpoint->failed = 1;
++	return -1;
++}
++
++int posix_dtls_send(int handle, const void *data, int size)
++{
++	struct endpoint *endpoint = endpoint_of(handle);
++
++	if (!endpoint || !endpoint->handshake_done || endpoint->failed)
++		return 0;
++	return mbedtls_ssl_write(&endpoint->ssl, data, (size_t)size) == size;
++}
++
++int posix_dtls_output(int handle, void *buffer, int size)
++{
++	struct endpoint *endpoint = endpoint_of(handle);
++
++	return endpoint ? queue_pop(&endpoint->output, buffer, size) : 0;
++}
++
++int posix_dtls_peer_fingerprint(int handle, unsigned char *fingerprint)
++{
++	struct endpoint *endpoint = endpoint_of(handle);
++	const mbedtls_x509_crt *certificate;
++
++	if (!endpoint || !endpoint->handshake_done)
++		return 0;
++	certificate = mbedtls_ssl_get_peer_cert(&endpoint->ssl);
++	if (!certificate)
++		return 0;
++	mbedtls_sha256(certificate->raw.p, certificate->raw.len, fingerprint, 0);
++	return 1;
++}
++
++void posix_hmac_sha1(const void *key, int key_size, const void *data, int size, unsigned char *digest)
++{
++	mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA1), key, (size_t)key_size, data, (size_t)size,
++		digest);
++}
+diff --git a/port/linux/src/posix_update.c b/port/linux/src/posix_update.c
+index fa8d7221..f7fabc96 100644
+--- a/port/linux/src/posix_update.c
++++ b/port/linux/src/posix_update.c
+@@ -314,8 +314,13 @@ struct download
+ 	unsigned long long received, total;
+ };
+ 
++/* (a release is tens of megabytes: a body past this fills no disk) */
++#define MAXIMUM_DOWNLOAD_SIZE (512ull * 1024 * 1024)
++
+ static int body_write(struct download *download, const unsigned char *data, size_t size)
+ {
++	if (download->received + size > MAXIMUM_DOWNLOAD_SIZE)
++		return 0;
+ 	if (fwrite(data, 1, size, download->file) != size)
+ 		return 0;
+ 	download->received += size;
+@@ -435,6 +440,12 @@ static int https_get(const char *url, struct download *download, char *location,
+ 		{
+ 			length = strtoull(value, NULL, 10);
+ 			have_length = 1;
++			if (length > MAXIMUM_DOWNLOAD_SIZE)
++			{
++				snprintf(error, (size_t)error_size, "the download from %s is too large", host);
++				connection_free(&connection);
++				return 0;
++			}
+ 		}
+ 		else if (!strcasecmp(line, "Transfer-Encoding") && strcasestr(value, "chunked"))
+ 		{
+diff --git a/port/linux/src/updater.c b/port/linux/src/updater.c
+index 79c35669..1b26a2cb 100644
+--- a/port/linux/src/updater.c
++++ b/port/linux/src/updater.c
+@@ -164,6 +164,13 @@ static int zip_extract_entry(SDL_IOStream *zip, unsigned long local_offset, int
+ 				if (result != Z_OK && result != Z_STREAM_END)
+ 					break;
+ 				produced = sizeof(output) - stream.avail_out;
++				/* (no more than the entry says, before it is on the disk) */
++				if (written + (unsigned long)produced > size)
++				{
++					snprintf(reason, reason_size, "it unpacks to more than %lu bytes", size);
++					result = Z_ERRNO;
++					break;
++				}
+ 				if (SDL_WriteIO(file, output, produced) != produced)
+ 				{
+ 					snprintf(reason, reason_size, "could not write %s after %lu bytes (%s)", path, written, SDL_GetError());
 diff --git a/port/linux/src/xbox_kernel.c b/port/linux/src/xbox_kernel.c
 index 04fc3267..b20400b4 100644
 --- a/port/linux/src/xbox_kernel.c
@@ -8782,6 +11482,30 @@ index 99d3c9b3..2f02bc03 100644
  				free(entry);
  			}
  			else
+diff --git a/port/linux/src/xbox_xapi.c b/port/linux/src/xbox_xapi.c
+index b15dca15..111bd2cb 100644
+--- a/port/linux/src/xbox_xapi.c
++++ b/port/linux/src/xbox_xapi.c
+@@ -159,11 +159,16 @@ static void delete_tree(const char *xbox_directory)
+ 		do
+ 		{
+ 			char child[MAX_PATH * 2];
++			int directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+ 
+-			snprintf(child, sizeof(child), "%s%s", xbox_directory, data.cFileName);
+-			if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
++			/* (a path that does not fit is left) */
++			if (snprintf(child, sizeof(child), "%s%s%s", xbox_directory, data.cFileName, directory ? "\\" : "") >=
++				(int)sizeof(child))
++			{
++				continue;
++			}
++			if (directory)
+ 			{
+-				strcat(child, "\\");
+ 				delete_tree(child);
+ 			}
+ 			else
 diff --git a/port/linux/src/xgpu.h b/port/linux/src/xgpu.h
 index 80f12565..37c1ddaf 100644
 --- a/port/linux/src/xgpu.h
@@ -9241,6 +11965,183 @@ index a2e87267..2dfcd8e0 100644
  	if (memcmp(&state->Gamepad, &controllers[port].previous, sizeof(state->Gamepad)))
  	{
  		controllers[port].packet_number++;
+diff --git a/port/linux/src/xnet.c b/port/linux/src/xnet.c
+index 56838b83..e4ef954b 100644
+--- a/port/linux/src/xnet.c
++++ b/port/linux/src/xnet.c
+@@ -611,7 +611,13 @@ int WSAAPI halo_ws_sendto(SOCKET socket, const char *buffer, int length, int fla
+ /* debug.network_latency and debug.network_loss: what this machine receives
+ is held back that many milliseconds (both ways between two machines: a
+ round trip of twice it) and that share of its datagrams lost, to test the
+-netcode as over the internet */
++netcode as over the internet. debug.network_corrupt: that share of the
++datagrams it receives, and debug.network_corrupt_stream that share of its
++reads of streams, is damaged at random (bytes changed, cut short,
++stretched, or replaced) from debug.network_corrupt_after seconds after the
++start (so that the game can be set up and started: what a host sends its
++own client over the loopback is damaged too), to test that nothing another
++machine sends can crash the game */
+ #define DELAYED_PACKET_SIZE 1500
+ #define MAXIMUM_DELAYED_PACKETS 4096
+ 
+@@ -632,6 +638,11 @@ static struct
+ 	int checked;
+ 	DWORD latency;
+ 	int loss_percent;
++	int corrupt_percent;
++	int corrupt_stream_percent;
++	DWORD corrupt_after;
++	DWORD started_time;
++	unsigned corrupt_seed;
+ 	struct delayed_packet *packets;
+ 	int first;
+ 	int count;
+@@ -647,23 +658,109 @@ static int delayed_enabled(void)
+ 	{
+ 		double latency = config_real("debug.network_latency");
+ 		double loss = config_real("debug.network_loss");
++		double corrupt = config_real("debug.network_corrupt");
++		double corrupt_stream = config_real("debug.network_corrupt_stream");
++		double corrupt_after = config_real("debug.network_corrupt_after");
+ 
+-		/* up to ten seconds, and a share */
++		/* up to ten seconds, and shares */
+ 		latency = !(latency > 0.0) ? 0.0 : latency > 10000.0 ? 10000.0 : latency;
+ 		loss = !(loss > 0.0) ? 0.0 : loss > 100.0 ? 100.0 : loss;
++		corrupt = !(corrupt > 0.0) ? 0.0 : corrupt > 100.0 ? 100.0 : corrupt;
++		corrupt_stream = !(corrupt_stream > 0.0) ? 0.0 : corrupt_stream > 100.0 ? 100.0 : corrupt_stream;
++		corrupt_after = !(corrupt_after > 0.0) ? 0.0 : corrupt_after > 86400.0 ? 86400.0 : corrupt_after;
+ 		delayed.latency = (DWORD)latency;
+ 		delayed.loss_percent = (int)loss;
++		delayed.corrupt_percent = (int)corrupt;
++		delayed.corrupt_stream_percent = (int)corrupt_stream;
++		delayed.corrupt_after = (DWORD)(corrupt_after * 1000.0);
++		delayed.started_time = GetTickCount();
++		delayed.corrupt_seed = (unsigned)GetTickCount() ^ (unsigned)(size_t)&delayed.checked;
+ 		delayed.checked = 1;
+-		if (delayed.latency || delayed.loss_percent)
++		if (delayed.latency || delayed.loss_percent || delayed.corrupt_percent || delayed.corrupt_stream_percent)
+ 		{
+ 			delayed.packets = calloc(MAXIMUM_DELAYED_PACKETS, sizeof(*delayed.packets));
+-			platform_log("network: receiving %lu ms late, losing %d%% of datagrams (testing)",
+-				(unsigned long)delayed.latency, delayed.loss_percent);
++			platform_log("network: receiving %lu ms late, losing %d%% of datagrams, damaging %d%% of them and %d%% of stream reads after %lu s (testing)",
++				(unsigned long)delayed.latency, delayed.loss_percent, delayed.corrupt_percent,
++				delayed.corrupt_stream_percent, (unsigned long)(delayed.corrupt_after / 1000));
+ 		}
+ 	}
+ 	return delayed.packets != NULL;
+ }
+ 
++/* (the test's own numbers, so that the game's rand() goes as without it) */
++static unsigned delayed_random(void)
++{
++	delayed.corrupt_seed = delayed.corrupt_seed * 1103515245u + 12345u;
++	return delayed.corrupt_seed >> 8;
++}
++
++/* damages a packet at random: a few bytes changed, cut short, stretched
++with random bytes (a datagram, up to the largest), or replaced throughout;
++the length it has after */
++static int delayed_corrupt(char *data, int length, int datagram)
++{
++	int count, index;
++
++	switch (delayed_random() % 8)
++	{
++	case 0:
++		/* (cut short, a datagram to nothing at times; a stream's read of
++		nothing would be the stream closing) */
++		if (length > 0)
++			length = datagram ? (int)(delayed_random() % (unsigned)(length + 1)) :
++				1 + (int)(delayed_random() % (unsigned)length);
++		break;
++	case 1:
++		if (datagram)
++		{
++			int stretched = (int)(delayed_random() % (unsigned)(DELAYED_PACKET_SIZE + 1));
++
++			for (index = length; index < stretched; index++)
++				data[index] = (char)delayed_random();
++			if (stretched > length)
++				length = stretched;
++		}
++		else if (length > 0)
++		{
++			data[delayed_random() % (unsigned)length] = (char)delayed_random();
++		}
++		break;
++	case 2:
++		for (index = 0; index < length; index++)
++			data[index] = (char)delayed_random();
++		break;
++	case 3:
++		/* (a run of bytes: a field, with its neighbours) */
++		if (length > 0)
++		{
++			int start = (int)(delayed_random() % (unsigned)length);
++			int run = 1 + (int)(delayed_random() % 16u);
++
++			for (index = start; index < length && index < start + run; index++)
++				data[index] = (char)delayed_random();
++		}
++		break;
++	case 4:
++		/* (the extremes a size or an index is checked against) */
++		if (length > 0)
++		{
++			static const unsigned char extremes[] = { 0x00, 0xFF, 0x7F, 0x80, 0x01, 0xFE };
++
++			count = 1 + (int)(delayed_random() % 4u);
++			for (index = 0; index < count; index++)
++				data[delayed_random() % (unsigned)length] = (char)extremes[delayed_random() % sizeof(extremes)];
++		}
++		break;
++	default:
++		/* (a few bits) */
++		count = 1 + (int)(delayed_random() % 8u);
++		for (index = 0; index < count && length > 0; index++)
++			data[delayed_random() % (unsigned)length] ^= (char)(1u << (delayed_random() % 8u));
++		break;
++	}
++	return length;
++}
++
+ /* drops what is held back for socket, and what has been read (socket -1),
+ keeping the rest in order */
+ static void delayed_drop(int socket)
+@@ -756,6 +853,14 @@ static int delayed_receive_locked(SOCKET socket, char *buffer, int length, int f
+ 			return 0;
+ 		if (datagram && rand() % 100 < delayed.loss_percent)
+ 			continue;
++		/* (a stream's reads by their own share: a damaged stream is dropped,
++		and the game must go on for its datagrams to be tested) */
++		if ((datagram ? delayed.corrupt_percent : delayed.corrupt_stream_percent) &&
++			GetTickCount() - delayed.started_time >= delayed.corrupt_after &&
++			(int)(delayed_random() % 100u) < (datagram ? delayed.corrupt_percent : delayed.corrupt_stream_percent))
++		{
++			result = delayed_corrupt(packet->data, result, datagram);
++		}
+ 		packet->socket = (int)socket;
+ 		packet->length = result;
+ 		packet->offset = 0;
+diff --git a/port/third_party/mbedtls/README.md b/port/third_party/mbedtls/README.md
+index d2cd24b4..890a4d43 100644
+--- a/port/third_party/mbedtls/README.md
++++ b/port/third_party/mbedtls/README.md
+@@ -12,6 +12,12 @@ Only `library/`, `include/` and `LICENSE` of the release are kept, without
+ their build files, and nothing in them is changed. The default configuration
+ (`include/mbedtls/mbedtls_config.h`) is used, with TLS 1.2 and 1.3.
+ 
++Every native build's internet play uses it for DTLS with browsers
++(`port/linux/src/posix_dtls.c`: WebRTC's DTLS 1.2 server, with a
++self-signed certificate made each run): the Linux and Windows builds, and
++the Android app's host library. The web build has none of it (a browser has
++its own WebRTC).
++
+ The Linux build's self-updater (`port/linux/src/posix_update.c`) uses it to
+ download new builds over HTTPS, with the system's certificate authorities.
+ The Windows build uses WinHTTP instead, and the Android app Java's HTTPS.
 diff --git a/source/cache/cache_files.c b/source/cache/cache_files.c
 index 334bc0d7..5f7eee0f 100644
 --- a/source/cache/cache_files.c
@@ -9346,6 +12247,44 @@ index 00a408a6..27626145 100644
  
  		CloseHandle(self->source_file);
  		self->source_file = NULL;
+diff --git a/source/cache/cache_files_windows.c b/source/cache/cache_files_windows.c
+index a284e8b2..d8a9ac46 100644
+--- a/source/cache/cache_files_windows.c
++++ b/source/cache/cache_files_windows.c
+@@ -584,6 +584,9 @@ boolean cache_files_precache_map_loaded(
+ 	return cached_map_files_find_map(tag_name_strip_path(map_name)) != NONE;
+ }
+ 
++/* (the port's, port/linux/src/sdl_platform.c) */
++void platform_log(char const *format, ...);
++
+ boolean cache_files_precache_map_begin(
+ 	const char *map_name,
+ 	boolean copy_map)
+@@ -604,6 +607,23 @@ boolean cache_files_precache_map_begin(
+ 			void *buffer;
+ 			struct cached_map_file *map_file;
+ 
++			/* port: the cache file slots are found by the name in their
++			header (cached_map_files_find_map): a map file whose header names
++			another map would be copied again each time it was asked for, for
++			ever */
++			if (_stricmp(header.name, cache_map_name) != 0)
++			{
++				error(_error_silent, "map '%s' names itself '%s' in its header: refused", cache_map_name, header.name);
++				platform_log("map %s.map names itself '%s' in its header; a map's name must be its file's",
++					cache_map_name, header.name);
++				if (copy_map)
++				{
++					display_error_damaged_media();
++				}
++
++				return FALSE;
++			}
++
+ 			/* port: a map no cache file holds (of no type the cache files are
+ 			for, or too big for its type's) is not precached; the texture
+ 			cache's memory is taken only once one does */
 diff --git a/source/cseries/cseries.h b/source/cseries/cseries.h
 index 9dfa3dfd..46a06290 100644
 --- a/source/cseries/cseries.h
@@ -9395,10 +12334,20 @@ index b6ed1634..b77b1603 100644
  	game_state_dispose_from_old_map();
  	cheats_dispose_from_old_map();
 diff --git a/source/game/game_engine.c b/source/game/game_engine.c
-index 29800ae1..59f1831f 100644
+index 29800ae1..abb15aaf 100644
 --- a/source/game/game_engine.c
 +++ b/source/game/game_engine.c
-@@ -7039,6 +7039,8 @@ boolean game_engine_vehicle_placement_allowed(
+@@ -6635,6 +6635,9 @@ void game_engine_variant_cleanup(
+ 	variant->universal_variant.respawn_time = MAX(variant->universal_variant.respawn_time, 0);
+ 	variant->universal_variant.suicide_penalty = MAX(variant->universal_variant.suicide_penalty, 0);
+ 	variant->universal_variant.lives = MAX(variant->universal_variant.lives, 0);
++	/* port: a NaN passes no comparison, so PIN keeps it */
++	if (!(variant->universal_variant.health == variant->universal_variant.health))
++		variant->universal_variant.health = 1.0f;
+ 	variant->universal_variant.health = PIN(variant->universal_variant.health, 0.25f, 4.0f);
+ 	variant->universal_variant.weapon_set = PIN(variant->universal_variant.weapon_set, 0, NUMBER_OF_GAME_ENGINE_WEAPON_SETS - 1);
+ 	variant->universal_variant.vehicle_set = PIN(variant->universal_variant.vehicle_set, 0, NUMBER_OF_GAME_ENGINE_VEHICLE_SETS - 1);
+@@ -7039,6 +7042,8 @@ boolean game_engine_vehicle_placement_allowed(
  		return TRUE;
  	side = global_variant.universal_variant.teams ? game_engine_nearest_team(&placement->position) : 0;
  	set = options->vehicle_set[side];
@@ -9407,7 +12356,7 @@ index 29800ae1..59f1831f 100644
  	type = game_engine_variant_vehicle_type(TAG_BLOCK_GET_ELEMENT(palette, placement->palette_entry_index,
  		struct scenario_object_palette_entry)->reference.index);
  	/* (the map's own: the multiplayer ones of the globals, as the Xbox
-@@ -7133,6 +7135,13 @@ long game_engine_remap_vehicle(
+@@ -7133,6 +7138,13 @@ long game_engine_remap_vehicle(
  {
  	long result = vehicle_definition_index;
  
@@ -9797,6 +12746,31 @@ index e0d616f8..e6492397 100644
  	main_framerate_render();
  	render_debug_profile();
  
+diff --git a/source/interface/progress_bar.c b/source/interface/progress_bar.c
+index a59196ce..2559f3c9 100644
+--- a/source/interface/progress_bar.c
++++ b/source/interface/progress_bar.c
+@@ -2246,9 +2246,18 @@ static void progress_bar_load_loading_texture(
+ 	file= fopen(source_path, "rb");
+ 	if (file)
+ 	{
++		image.width= 0;
++		image.height= 0;
++		image.image_type= 0;
++		image.pixel_depth= 0;
+ 		tgaLoadHeader(file, &image);
+-		image.pixels= pixels;
+-		tgaLoadImageData(file, &image);
++		/* port: the file is a map pack's: only an uncompressed 24-bit
++		picture the texture's size is read into it */
++		if (image.image_type==2 && image.pixel_depth==24 && image.width==320 && image.height==240)
++		{
++			image.pixels= pixels;
++			tgaLoadImageData(file, &image);
++		}
+ 		fclose(file);
+ 	}
+ 	IDirect3DTexture8_UnlockRect(*texture, 0);
 diff --git a/source/interface/ui_widget_event_handler_functions.c b/source/interface/ui_widget_event_handler_functions.c
 index 45147d92..061f1f9b 100644
 --- a/source/interface/ui_widget_event_handler_functions.c
@@ -9897,6 +12871,339 @@ index f535e6ee..1535300d 100644
  		{
  			geometry_detail_level_index--;
  		}
+diff --git a/source/networking/network_client_manager.c b/source/networking/network_client_manager.c
+index fa6fd584..919b2ff2 100644
+--- a/source/networking/network_client_manager.c
++++ b/source/networking/network_client_manager.c
+@@ -761,6 +761,8 @@ static void network_game_client_update_precache_status(
+ static boolean network_game_client_map_name_is_valid(
+ 	char const *map_name,
+ 	long size);
++static boolean network_game_client_game_record_is_valid(
++	struct network_game *game);
+ static boolean network_game_client_idle_searching(
+ 	struct network_game_client *client);
+ static boolean network_game_client_idle_joining(
+@@ -1273,6 +1275,14 @@ boolean network_game_client_game_settings_updated(
+ 	{
+ 		struct network_game previous_game;
+ 
++		/* port: the record's players: no two the same machine's same
++		controller, no machine with more than its local players; the
++		strings ending in their fields */
++		if (!network_game_client_game_record_is_valid(message_packet))
++		{
++			network_event("invalid message_server_game_settings_update message received: its players");
++			return FALSE;
++		}
+ 		if (csstrcmp(message_packet->map.name, client->game.map.name))
+ 		{
+ 			char build[0x20];
+@@ -1587,7 +1597,13 @@ boolean network_game_client_handle_game_update(
+ 	/* (the host's time at the start, and a game in progress's past 16 bits
+ 	of ticks: the host's whole time, if it is ahead; never back, which the
+ 	host would take for old messages) */
+-	if (network_game_client_late_join_clock_pending)
++	/* port: and never one the game's arithmetic on its time (a second more,
++	a time limit) could take past a long */
++	if (message_packet->game_time < 0 || message_packet->game_time > 0x3FFFFFFF)
++	{
++		network_event("ignoring the host's game tick #%ld", message_packet->game_time);
++	}
++	else if (network_game_client_late_join_clock_pending)
+ 	{
+ 		network_game_client_late_join_clock_pending = FALSE;
+ 		if (message_packet->game_time > game_time_get())
+@@ -2311,10 +2327,55 @@ static boolean network_game_client_map_name_is_valid(
+ 	long size)
+ {
+ 	/* (a scenario's tag path, of which the cache takes the name after the
+-	last backslash) */
+-	return memchr(map_name, '\0', size) != NULL &&
+-		!strchr(map_name, '/') &&
+-		!strstr(map_name, "..");
++	last backslash: letters, digits and a few more, none that a path reads
++	otherwise) */
++	char const *character;
++	char const *leaf;
++
++	if (!memchr(map_name, '\0', size))
++		return FALSE;
++	for (character = map_name; *character; character++)
++	{
++		if (!((*character >= 'a' && *character <= 'z') || (*character >= 'A' && *character <= 'Z') ||
++			(*character >= '0' && *character <= '9') || *character == '_' || *character == '-' ||
++			*character == '.' || *character == ' ' || *character == '\\'))
++		{
++			return FALSE;
++		}
++	}
++	if (strstr(map_name, ".."))
++		return FALSE;
++	leaf = strrchr(map_name, '\\');
++	leaf = leaf ? leaf + 1 : map_name;
++	return *leaf && leaf[strspn(leaf, ". ")] != 0;
++}
++
++/* port: the players of a settings record the host sends: each valid one
++the only one of its machine's controller (so no machine has more than its
++local players); the record's strings made to end in their fields */
++static boolean network_game_client_game_record_is_valid(
++	struct network_game *game)
++{
++	short machine_players[HALO_PORT_MAXIMUM_NETWORK_MACHINES][MAXIMUM_LOCAL_PLAYERS];
++	short index;
++
++	game->name[NUMBEROF(game->name) - 1] = 0;
++	game->variant.human_readable_game_description[NUMBEROF(game->variant.human_readable_game_description) - 1] = 0;
++	for (index = 0; index < NUMBEROF(game->machines); index++)
++		game->machines[index].name[NUMBEROF(game->machines[index].name) - 1] = 0;
++	csmemset(machine_players, 0, sizeof(machine_players));
++	for (index = 0; index < NUMBEROF(game->players); index++)
++	{
++		struct network_player *player = &game->players[index];
++
++		player->name[NUMBEROF(player->name) - 1] = 0;
++		if (!network_player_is_valid(player))
++			continue;
++		if (machine_players[player->machine_index][player->controller_index]++)
++			return FALSE;
++	}
++
++	return TRUE;
+ }
+ 
+ static boolean add_advertised_game(
+diff --git a/source/networking/network_client_message_handler.c b/source/networking/network_client_message_handler.c
+index c1fc58cb..764bcb25 100644
+--- a/source/networking/network_client_message_handler.c
++++ b/source/networking/network_client_message_handler.c
+@@ -480,6 +480,27 @@ boolean network_game_client_handle_message(
+ 	{
+ 		network_event("client received client message with invalid flags");
+ 	}
++	/* port: the host sends every message of the game over its connection,
++	only its advertisement and its answer to a ping in datagrams (and the
++	distributed netcode's messages, _message_type_data, which are checked as
++	the host's below): a datagram, which anyone can send as the host, is
++	taken for nothing else */
++	else if (message_type == _message_type_packet && network_connection_last_read_was_unreliable() &&
++		((byte *)message)[message_size - 1] != _message_server_game_advertise &&
++		((byte *)message)[message_size - 1] != _message_server_pong)
++	{
++		static unsigned long last_logged_time;
++		static boolean logged;
++		unsigned long now = system_milliseconds();
++
++		if (!logged || now - last_logged_time >= 1000)
++		{
++			network_event("ignoring a game message of type %d in a datagram @ %s",
++				((byte *)message)[message_size - 1], transport_address_to_string(source_address));
++			last_logged_time = now;
++			logged = TRUE;
++		}
++	}
+ 	else
+ 	{
+ 		switch (message_type)
+@@ -720,11 +741,18 @@ boolean network_game_client_handle_message(
+ 				{
+ 					byte *error_message = (byte *)(message + 1);
+ 
++					/* (port: printable ASCII only, so that it forges no line
++					of the log) */
++					char text[TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH + 1];
++					long index;
++
++					for (index = 0; index < TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH && error_message[index]; index++)
++						text[index] = error_message[index] >= 0x20 && error_message[index] < 0x7F ? (char)error_message[index] : '?';
++					text[index] = 0;
+ 					network_event(
+-						"client received low-level error message: error= #%d (%.*s)",
++						"client received low-level error message: error= #%d (%s)",
+ 						error_message[TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH],
+-						(int)TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH,
+-						(char const *)error_message);
++						text);
+ 				}
+ 				else
+ 				{
+diff --git a/source/networking/network_connection.c b/source/networking/network_connection.c
+index 3aeedd61..6a058d75 100644
+--- a/source/networking/network_connection.c
++++ b/source/networking/network_connection.c
+@@ -1326,6 +1326,8 @@ static boolean network_client_reliable_connection_read(
+ 	return success;
+ }
+ 
++static boolean network_connection_last_read_unreliable;
++
+ boolean network_connection_read(
+ 	struct network_connection *connection,
+ 	void *buffer,
+@@ -1346,14 +1348,25 @@ boolean network_connection_read(
+ 		connection->flags&FLAG(_connection_create_serverside_client_bit));
+ 
+ 	result = network_client_reliable_connection_read(connection, buffer, buffer_size, source_address);
++	network_connection_last_read_unreliable = FALSE;
+ 	if (!result && TEST_FLAG(connection->flags, _connection_create_clientside_client_bit))
+ 	{
+ 		result = network_client_unreliable_connection_read(connection, buffer, buffer_size, source_address);
++		network_connection_last_read_unreliable = result;
+ 	}
+ 
+ 	return result;
+ }
+ 
++/* port: whether the message network_connection_read last gave a client came
++in a datagram (which anyone can send as the host) rather than over its
++connection to the host */
++boolean network_connection_last_read_was_unreliable(
++	void)
++{
++	return network_connection_last_read_unreliable;
++}
++
+ boolean network_server_close_client_connection(
+ 	struct network_connection *server_connection,
+ 	struct network_connection *client_connection)
+diff --git a/source/networking/network_connection.h b/source/networking/network_connection.h
+index 5903799a..5d34a9b5 100644
+--- a/source/networking/network_connection.h
++++ b/source/networking/network_connection.h
+@@ -51,6 +51,8 @@ boolean network_connection_connect(
+ struct network_connection *network_connection_new(
+ 	unsigned long flags,
+ 	word well_known_port);
++boolean network_connection_last_read_was_unreliable(
++	void);
+ boolean network_connection_read(
+ 	struct network_connection *connection,
+ 	void *buffer,
+diff --git a/source/networking/network_game_manager.c b/source/networking/network_game_manager.c
+index 3aa08f74..22b154fb 100644
+--- a/source/networking/network_game_manager.c
++++ b/source/networking/network_game_manager.c
+@@ -86,6 +86,7 @@ symbols in this file:
+ #include "main/main.h"
+ #include "memory/data.h"
+ #include "network_game_globals.h"
++#include "network_messages.h"
+ #include "network_game_manager.h"
+ #include "network_game_ui.h"
+ #include "networking/network_server_manager.h"
+@@ -400,7 +401,7 @@ boolean network_game_add_player(
+ 	}
+ 	else
+ 	{
+-		error(2, "game is already at maximum players; can't add new player");
++		network_event("game is already at maximum players; can't add new player");
+ 	}
+ 
+ 	return result;
+@@ -637,7 +638,7 @@ boolean network_game_update_player(
+ 	}
+ 
+ 	if (!result)
+-		error(2, "tried to update a player with indvalid data");
++		network_event("tried to update a player with indvalid data");
+ 
+ 	return result;
+ }
+@@ -679,7 +680,7 @@ boolean network_game_remove_player(
+ 	}
+ 	else
+ 	{
+-		error(2, "tried to remove a player with indvalid data");
++		network_event("tried to remove a player with indvalid data");
+ 	}
+ 
+ 	return result;
+@@ -710,7 +711,7 @@ boolean network_game_remove_machine(
+ 						game->players[player_index].machine_index == machine->machine_index)
+ 					{
+ 						if (!network_game_remove_player(game, &game->players[player_index]))
+-							error(2, "failed to remove a machine's player");
++							network_event("failed to remove a machine's player");
+ 					}
+ 				}
+ 
+diff --git a/source/networking/network_server_manager.c b/source/networking/network_server_manager.c
+index a9ca0c48..dfcb369a 100644
+--- a/source/networking/network_server_manager.c
++++ b/source/networking/network_server_manager.c
+@@ -3409,7 +3409,15 @@ static boolean network_game_server_client_machine_timed_out(
+ 	if (TEST_FLAG(machine->flags, _network_client_machine_level_loaded_bit))
+ 		return silence > NETWORK_GAME_SERVER_CLIENT_TIMEOUT;
+ 	/* (joining the game in progress: waiting for its players to be added,
+-	or loading) */
++	or loading; port: one that adds none in the time a machine has to in
++	the pregame holds its slot for nothing) */
++	if (!network_game_server_machine_has_players(server, machine->machine_index) &&
++		!network_game_server_machine_has_waiting_players(server, machine->machine_index) &&
++		system_milliseconds() - network_game_server_client_machine_join_times[machine->machine_index] >
++			NETWORK_GAME_SERVER_PLAYERLESS_MACHINE_TIMEOUT)
++	{
++		return TRUE;
++	}
+ 	return silence > NETWORK_GAME_SERVER_LATE_JOINER_TIMEOUT;
+ }
+ 
+diff --git a/source/networking/network_server_message_handler.c b/source/networking/network_server_message_handler.c
+index d44fb3b5..e01e93ba 100644
+--- a/source/networking/network_server_message_handler.c
++++ b/source/networking/network_server_message_handler.c
+@@ -306,6 +306,20 @@ enum
+ 
+ #define MINIMUM_TRANSPORT_ERROR_MESSAGE_SIZE (sizeof(word) + TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH + sizeof(byte))
+ 
++/* port: the text of a transport error message as it is logged: printable
++ASCII only (it is a machine's to send), ending with the buffer */
++static char const *transport_error_message_text(
++	byte const *error_message)
++{
++	static char text[TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH + 1];
++	long index;
++
++	for (index = 0; index < TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH && error_message[index]; index++)
++		text[index] = error_message[index] >= 0x20 && error_message[index] < 0x7F ? (char)error_message[index] : '?';
++	text[index] = 0;
++	return text;
++}
++
+ enum
+ {
+ 	_message_type_error = 1,
+@@ -1369,12 +1383,12 @@ boolean network_game_server_handle_client_message(
+ 				{
+ 					byte *error_message = (byte *)(message + 1);
+ 
+-					/* (the text need not end in the message) */
++					/* (the text need not end in the message; printable only, so
++					that it forges no line of the log) */
+ 					network_event(
+-						"server received low-level error message from a client: error= #%d (%.*s)",
++						"server received low-level error message from a client: error= #%d (%s)",
+ 						error_message[TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH],
+-						(int)TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH,
+-						error_message);
++						transport_error_message_text(error_message));
+ 				}
+ 				else
+ 				{
+@@ -1576,10 +1590,9 @@ boolean network_game_server_handle_datagram(
+ 					byte *error_message = (byte *)(message + 1);
+ 
+ 					network_event(
+-						"server received low-level error message: error= #%d (%.*s); sender= '%s'",
++						"server received low-level error message: error= #%d (%s); sender= '%s'",
+ 						error_message[TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH],
+-						(int)TRANSPORT_ERROR_MESSAGE_TEXT_LENGTH,
+-						error_message,
++						transport_error_message_text(error_message),
+ 						transport_address_to_string(source_address));
+ 				}
+ 				else
 diff --git a/source/rasterizer/rasterizer.c b/source/rasterizer/rasterizer.c
 index 15ba5dd0..bacebc4c 100644
 --- a/source/rasterizer/rasterizer.c
@@ -10940,11 +14247,414 @@ index dad616be..db228e0b 100644
  					render_object_list(data, NULL, data->object_index);
  					render_object_shadow_end(data);
  				}
+diff --git a/source/saved games/game_state.c b/source/saved games/game_state.c
+index 8ed2e5b8..51d1b803 100644
+--- a/source/saved games/game_state.c	
++++ b/source/saved games/game_state.c	
+@@ -96,6 +96,7 @@ symbols in this file:
+ 
+ #include "cseries.h"
+ #include "cseries_windows.h"
++#include "cseries/errors.h"
+ #include "real_math.h"
+ #include "console.h"
+ #include "game_state.h"
+@@ -330,7 +331,13 @@ void game_state_revert(
+ 	}
+ 
+ 	game_state_call_before_load_procs();
+-	game_state_read_from_file();
++	/* port: a file that is not a saved game of this build is not taken, and
++	the map starts over */
++	if (!game_state_read_from_file())
++	{
++		game_state_globals.saved_game_valid = FALSE;
++		main_reset_map();
++	}
+ 	game_state_call_after_load_procs();
+ 
+ 	return;
+@@ -370,7 +377,8 @@ boolean game_state_test_persistent_storage(
+ 		corrupted))
+ 	{
+ 		*difficulty = header.difficulty;
+-		strcpy(map_name, header.map_name);
++		csstrncpy(map_name, header.map_name, sizeof(header.map_name));
++		map_name[sizeof(header.map_name) - 1] = 0;
+ 
+ 		success = TRUE;
+ 	}
+@@ -461,6 +469,15 @@ static boolean game_state_header_valid(
+ 	{
+ 		valid = TRUE;
+ 	}
++	/* port: why a saved game is not loaded, for the log */
++	if (!valid)
++	{
++		error(_error_silent, "the saved game is not taken: its header is of map '%s' (this is '%s'), allocations %08lx (%08lx), %d players (%d), map checksum %08lx (%08lx)",
++			header->map_name, tag_get_name(global_scenario_index),
++			(unsigned long)header->allocation_size_checksum, (unsigned long)game_state_globals.allocation_size_checksum,
++			header->player_count, player_spawn_count,
++			(unsigned long)header->cache_file_checksum, (unsigned long)cache_files_get_checksum());
++	}
+ 
+ 	return valid;
+ }
+@@ -541,15 +558,280 @@ void *game_state_gpu_malloc(
+ 	return pointer;
+ }
+ 
++
++/* ---------- port: the image of a saved game
++
++A saved game (a checkpoint's savegame.bin, a core) is the game state's
++memory as it was, read back over it: with the data arrays' pointers to
++their elements, the objects' memory pool's blocks and their references, and
++the caches' procedures in it. The file is anyone's, so before an image is
++taken, what the game state has of those is checked against what was made
++at startup (the same in every run of this build: the header's allocation
++checksum says so), and the procedures are put back. An image that fails is
++not taken. */
++
++enum
++{
++	_game_state_allocation_data,
++	_game_state_allocation_memory_pool,
++	_game_state_allocation_lruv_cache,
++
++	MAXIMUM_GAME_STATE_ALLOCATIONS = 256,
++};
++
++struct game_state_allocation
++{
++	short kind;
++	short maximum_count;
++	short element_size;
++	void *address;
++	long size;
++	long page_count;
++	long page_size_bits;
++	lruv_delete_block_proc delete_block_proc;
++	lruv_locked_block_proc locked_block_proc;
++};
++
++static struct game_state_allocation game_state_allocations[MAXIMUM_GAME_STATE_ALLOCATIONS];
++static long game_state_allocation_count;
++
++static struct game_state_allocation *game_state_allocation_new(
++	short kind,
++	void *address)
++{
++	struct game_state_allocation *allocation;
++
++	match_assert("game_state.c", 0, game_state_allocation_count < MAXIMUM_GAME_STATE_ALLOCATIONS);
++	if (game_state_allocation_count >= MAXIMUM_GAME_STATE_ALLOCATIONS)
++		return NULL;
++	allocation = &game_state_allocations[game_state_allocation_count++];
++	csmemset(allocation, 0, sizeof(*allocation));
++	allocation->kind = kind;
++	allocation->address = address;
++
++	return allocation;
++}
++
++/* whether [address, address+size) lies in the game state */
++static boolean game_state_image_contains(
++	void const *address,
++	long size)
++{
++	byte const *base = game_state_globals.base_address;
++	byte const *pointer = address;
++
++	return size >= 0 && pointer >= base && pointer <= base + GAME_STATE_SIZE &&
++		size <= (base + GAME_STATE_SIZE) - pointer;
++}
++
++/* where the image holds what the game state has at address */
++static void *game_state_image_pointer(
++	byte *image,
++	void const *address)
++{
++	return image + ((byte const *)address - (byte const *)game_state_globals.base_address);
++}
++
++static boolean game_state_image_refuse(
++	char const *name,
++	char const *reason)
++{
++	error(2, "the saved game is not taken: %s %s", name, reason);
++
++	return FALSE;
++}
++
++/* a data array as it was made (its pointer to its elements, its capacity)
++with counts that fit */
++static boolean game_state_image_data_valid(
++	byte *image,
++	struct data_array *live,
++	short maximum_count,
++	short element_size)
++{
++	struct data_array *data = game_state_image_pointer(image, live);
++	char const *name;
++
++	data->name[NUMBEROF(data->name) - 1] = 0;
++	name = data->name;
++	if (data->signature != 'd@t@')
++		return game_state_image_refuse(name, "is a data array of another signature");
++	if (data->maximum_count != maximum_count || data->size != element_size)
++		return game_state_image_refuse(name, "is a data array of another capacity");
++	if (data->data != live + 1)
++		return game_state_image_refuse(name, "is a data array whose elements are elsewhere");
++	if (data->count < 0 || data->count > data->maximum_count ||
++		data->first_free_absolute_index < 0 || data->first_free_absolute_index > data->maximum_count ||
++		data->actual_count < 0 || data->actual_count > data->count)
++	{
++		return game_state_image_refuse(name, "is a data array with counts past its capacity");
++	}
++	data->valid = data->valid != FALSE;
++	data->identifier_zero_invalid = data->identifier_zero_invalid != FALSE;
++
++	return TRUE;
++}
++
++/* whether the reference of a block (the pointer to it that the pool keeps
++up to date) is in a data array's elements */
++static boolean game_state_image_reference_valid(
++	void **reference)
++{
++	long index;
++
++	if (!game_state_image_contains(reference, sizeof(*reference)) || ((unsigned long)reference & 3))
++		return FALSE;
++	for (index = 0; index < game_state_allocation_count; index++)
++	{
++		struct game_state_allocation const *allocation = &game_state_allocations[index];
++
++		if (allocation->kind == _game_state_allocation_data)
++		{
++			byte const *first = (byte const *)((struct data_array *)allocation->address + 1);
++			byte const *last = first + (long)allocation->maximum_count * allocation->element_size;
++
++			if ((byte const *)reference >= first && (byte const *)(reference + 1) <= last)
++				return TRUE;
++		}
++	}
++
++	return FALSE;
++}
++
++/* a memory pool as it was made, whose blocks lie in it in order, each
++referenced from a data array's element that holds the block's address */
++static boolean game_state_image_memory_pool_valid(
++	byte *image,
++	struct memory_pool *live,
++	long size)
++{
++	struct memory_pool *pool = game_state_image_pointer(image, live);
++	byte const *first = (byte const *)(live + 1);
++	byte const *last = first + size;
++	struct memory_pool_block *block_live = pool->first_block;
++	struct memory_pool_block *previous_live = NULL;
++	long used = 0;
++	long count = 0;
++	char const *name;
++
++	pool->name[NUMBEROF(pool->name) - 1] = 0;
++	name = pool->name;
++	if (pool->signature != 'pool')
++		return game_state_image_refuse(name, "is a memory pool of another signature");
++	if (pool->base_address != live + 1 || pool->size != size)
++		return game_state_image_refuse(name, "is a memory pool of another size or place");
++	while (block_live)
++	{
++		struct memory_pool_block *block;
++
++		if ((byte const *)block_live < first || (byte const *)block_live > last - sizeof(*block) ||
++			((unsigned long)block_live & 3) || ++count > size / (long)sizeof(*block))
++		{
++			return game_state_image_refuse(name, "is a memory pool with a block outside it");
++		}
++		block = game_state_image_pointer(image, block_live);
++		if (block->header_signature != 'head' || block->trailer_signature != 'tail')
++			return game_state_image_refuse(name, "is a memory pool with a block of another signature");
++		if (block->size < (long)sizeof(*block) || (block->size & 3) || block->size > last - (byte const *)block_live)
++			return game_state_image_refuse(name, "is a memory pool with a block of a bad size");
++		if (block->previous_block != previous_live)
++			return game_state_image_refuse(name, "is a memory pool with blocks out of order");
++		if (block->next_block && (byte const *)block->next_block < (byte const *)block_live + block->size)
++			return game_state_image_refuse(name, "is a memory pool with blocks that overlap");
++		if (!game_state_image_reference_valid(block->reference) ||
++			*(void **)game_state_image_pointer(image, block->reference) != block_live + 1)
++		{
++			return game_state_image_refuse(name, "is a memory pool with a block referenced from elsewhere");
++		}
++		used += block->size;
++		previous_live = block_live;
++		block_live = block->next_block;
++	}
++	if (pool->last_block != previous_live || pool->free_size != size - used)
++		return game_state_image_refuse(name, "is a memory pool whose last block or free size is wrong");
++
++	return TRUE;
++}
++
++/* an lruv cache as it was made, with its procedures put back */
++static boolean game_state_image_lruv_cache_valid(
++	byte *image,
++	struct lruv_cache *live,
++	struct game_state_allocation const *allocation)
++{
++	struct lruv_cache *cache = game_state_image_pointer(image, live);
++	struct data_array *blocks_live = (struct data_array *)(live + 1);
++	char const *name;
++
++	cache->name[NUMBEROF(cache->name) - 1] = 0;
++	name = cache->name;
++	if (cache->signature != 'weee')
++		return game_state_image_refuse(name, "is a cache of another signature");
++	if (cache->blocks != blocks_live || cache->page_count != allocation->page_count ||
++		cache->page_size_bits != allocation->page_size_bits)
++	{
++		return game_state_image_refuse(name, "is a cache of another size or place");
++	}
++	cache->delete_block_proc = allocation->delete_block_proc;
++	cache->locked_block_proc = allocation->locked_block_proc;
++
++	return game_state_image_data_valid(image, blocks_live, allocation->maximum_count, sizeof(struct lruv_cache_block));
++}
++
++boolean game_state_image_accept(
++	void *image,
++	long size)
++{
++	long index;
++
++	if (size != GAME_STATE_SIZE)
++		return game_state_image_refuse("the image", "is of another size");
++	for (index = 0; index < game_state_allocation_count; index++)
++	{
++		struct game_state_allocation const *allocation = &game_state_allocations[index];
++		boolean valid;
++
++		switch (allocation->kind)
++		{
++		case _game_state_allocation_data:
++			valid = game_state_image_data_valid(image, allocation->address, allocation->maximum_count,
++				allocation->element_size);
++			break;
++		case _game_state_allocation_memory_pool:
++			valid = game_state_image_memory_pool_valid(image, allocation->address, allocation->size);
++			break;
++		case _game_state_allocation_lruv_cache:
++			valid = game_state_image_lruv_cache_valid(image, allocation->address, allocation);
++			break;
++		default:
++			valid = FALSE;
++			break;
++		}
++		if (!valid)
++			return FALSE;
++	}
++	csmemcpy(game_state_globals.base_address, image, size);
++	error(_error_silent, "the saved game is taken");
++
++	return TRUE;
++}
++
+ struct data_array *game_state_data_new(
+ 	const char *name,
+ 	short maximum_count,
+ 	short size)
+ {
+ 	struct data_array *data;
++	struct game_state_allocation *allocation;
+ 
+ 	data = game_state_malloc(name, "data array", data_allocation_size(maximum_count, size));
+ 	data_initialize(data, name, maximum_count, size);
++	allocation = game_state_allocation_new(_game_state_allocation_data, data);
++	if (allocation)
++	{
++		allocation->maximum_count = maximum_count;
++		allocation->element_size = size;
++	}
+ 
+ 	return data;
+ }
+@@ -562,6 +844,12 @@ struct memory_pool *game_state_memory_pool_new(
+ 
+ 	pool = game_state_malloc(name, "memory pool", memory_pool_allocation_size(size));
+ 	memory_pool_initialize(pool, name, size);
++	{
++		struct game_state_allocation *allocation = game_state_allocation_new(_game_state_allocation_memory_pool, pool);
++
++		if (allocation)
++			allocation->size = size;
++	}
+ 
+ 	return pool;
+ }
+@@ -578,6 +866,18 @@ struct lruv_cache *game_state_lruv_cache_new(
+ 
+ 	cache = game_state_malloc(name, "lruv cache", lruv_allocation_size(maximum_block_count));
+ 	lruv_initialize(cache, name, page_count, page_size_bits, maximum_block_count, delete_block_proc, locked_block_proc);
++	{
++		struct game_state_allocation *allocation = game_state_allocation_new(_game_state_allocation_lruv_cache, cache);
++
++		if (allocation)
++		{
++			allocation->maximum_count = (short)maximum_block_count;
++			allocation->page_count = page_count;
++			allocation->page_size_bits = page_size_bits;
++			allocation->delete_block_proc = delete_block_proc;
++			allocation->locked_block_proc = locked_block_proc;
++		}
++	}
+ 
+ 	return cache;
+ }
+@@ -594,7 +894,9 @@ void game_state_try_and_load_from_persistent_storage(
+ 			GAME_STATE_SIZE,
+ 			NULL)
+ 		&& game_state_header_valid(&header, FALSE)
+-		&& main_get_difficulty() == header.difficulty)
++		&& (main_get_difficulty() == header.difficulty ||
++			(error(_error_silent, "the saved game is not taken: it is of difficulty %d, this game of %d",
++				header.difficulty, main_get_difficulty()), FALSE)))
+ 	{
+ 		game_state_call_before_load_procs();
+ 		game_state_read_from_persistent_storage(
+diff --git a/source/saved games/game_state.h b/source/saved games/game_state.h
+index b8e8e02a..f9f0511b 100644
+--- a/source/saved games/game_state.h	
++++ b/source/saved games/game_state.h	
+@@ -49,6 +49,11 @@ boolean game_state_test_persistent_storage(
+ 	char *map_name,
+ 	short *difficulty,
+ 	boolean *corrupted);
++/* port: takes an image of the game state read from a file, if it is one of
++this build's (game_state.c) */
++boolean game_state_image_accept(
++	void *image,
++	long size);
+ void game_state_save_core(
+ 	const char *name);
+ boolean game_state_reverted(
 diff --git a/source/saved games/game_state_xbox.c b/source/saved games/game_state_xbox.c
-index 024dc41d..010c0369 100644
+index 024dc41d..17c2fdc3 100644
 --- a/source/saved games/game_state_xbox.c	
 +++ b/source/saved games/game_state_xbox.c	
-@@ -146,6 +146,17 @@ static HANDLE game_state_open_persistent_storage(
+@@ -139,6 +139,9 @@ typedef char verify_xbox_game_state_globals_prefix_size[
+ 
+ /* ---------- prototypes */
+ 
++static void game_state_header_terminate(
++	void *header,
++	long header_size);
+ static HANDLE game_state_open_persistent_storage(
+ 	const char *directory);
+ 
+@@ -146,6 +149,17 @@ static HANDLE game_state_open_persistent_storage(
  
  static struct xbox_game_state_globals_prefix xbox_game_state_globals = { 0 };
  
@@ -10962,7 +14672,7 @@ index 024dc41d..010c0369 100644
  /* ---------- public code */
  
  void *game_state_allocate_buffer(
-@@ -227,6 +238,20 @@ void game_state_create_or_open_file(
+@@ -227,6 +241,20 @@ void game_state_create_or_open_file(
  		87,
  		!xbox_game_state_globals.file_open);
  
@@ -10983,7 +14693,7 @@ index 024dc41d..010c0369 100644
  	xbox_game_state_globals.handle = CreateFileA("z:\\savegame.bin",
  		GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
  		FILE_FLAG_NO_BUFFERING|FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-@@ -257,7 +282,13 @@ void game_state_close_file(
+@@ -257,7 +285,13 @@ void game_state_close_file(
  		"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
  		106,
  		xbox_game_state_globals.file_open);
@@ -10997,7 +14707,7 @@ index 024dc41d..010c0369 100644
  	xbox_game_state_globals.file_open = FALSE;
  
  	return;
-@@ -278,6 +309,15 @@ boolean game_state_write_to_file(
+@@ -278,6 +312,15 @@ boolean game_state_write_to_file(
  		121,
  		xbox_game_state_globals.file_open);
  
@@ -11013,10 +14723,19 @@ index 024dc41d..010c0369 100644
  	if (SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
  			INVALID_SET_FILE_POINTER &&
  		WriteFile(xbox_game_state_globals.handle, xbox_game_state_globals.buffer,
-@@ -318,6 +358,14 @@ boolean game_state_read_from_file(
+@@ -304,6 +347,7 @@ boolean game_state_read_from_file(
+ {
+ 	unsigned long bytes_read;
+ 	boolean result = FALSE;
++	void *image;
+ 
+ 	match_assert(
+ 		"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
+@@ -318,11 +362,23 @@ boolean game_state_read_from_file(
  		146,
  		xbox_game_state_globals.file_valid_for_read || recover_saved_games_hack);
  
+-	if (SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
 +#ifdef HALO_ANDROID
 +	/* (nothing written to the copy, even for recover_saved_games_hack: there
 +	is no file of an earlier session to recover) */
@@ -11025,9 +14744,128 @@ index 024dc41d..010c0369 100644
 +	memcpy(xbox_game_state_globals.buffer, checkpoint, xbox_game_state_globals.buffer_size);
 +	return TRUE;
 +#endif
- 	if (SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
++	/* port: read beside the game state, and taken once checked */
++	image = malloc(xbox_game_state_globals.buffer_size);
++	if (image &&
++		SetFilePointer(xbox_game_state_globals.handle, 0, NULL, FILE_BEGIN) !=
  			INVALID_SET_FILE_POINTER &&
- 		ReadFile(xbox_game_state_globals.handle, xbox_game_state_globals.buffer,
+-		ReadFile(xbox_game_state_globals.handle, xbox_game_state_globals.buffer,
++		ReadFile(xbox_game_state_globals.handle, image,
+ 			xbox_game_state_globals.buffer_size, &bytes_read, NULL) &&
+-		bytes_read == xbox_game_state_globals.buffer_size)
++		bytes_read == xbox_game_state_globals.buffer_size &&
++		game_state_image_accept(image, xbox_game_state_globals.buffer_size))
+ 	{
+ 		result = TRUE;
+ 	}
+@@ -334,6 +390,7 @@ boolean game_state_read_from_file(
+ 			FALSE,
+ 			csprintf(temporary, "couldn't read saved game file (#%d)", GetLastError()));
+ 	}
++	free(image);
+ 
+ 	return result;
+ }
+@@ -383,6 +440,7 @@ boolean game_state_read_core_header(
+ 		if (ReadFile(file, header, header_size, &bytes_read, NULL) &&
+ 			bytes_read == header_size)
+ 		{
++			game_state_header_terminate(header, header_size);
+ 			result = TRUE;
+ 		}
+ 	}
+@@ -400,17 +458,23 @@ void game_state_read_core(
+ 	HANDLE file;
+ 	unsigned long bytes_read;
+ 
++	void *image = malloc(buffer_size);
++
+ 	sprintf(path, "d:\\core\\%s", name);
+ 	file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+ 		NULL);
++	/* port: read beside the game state, and taken once checked */
+ 	match_vassert(
+ 		"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
+ 		226,
+-		file != INVALID_HANDLE_VALUE &&
+-			ReadFile(file, buffer, buffer_size, &bytes_read, NULL) &&
+-			bytes_read == buffer_size,
++		image && file != INVALID_HANDLE_VALUE &&
++			ReadFile(file, image, buffer_size, &bytes_read, NULL) &&
++			bytes_read == buffer_size &&
++			game_state_image_accept(image, buffer_size),
+ 		"game state has been corrupted (thank you, come again)");
++	(void)buffer;
+ 	CloseHandle(file);
++	free(image);
+ 
+ 	return;
+ }
+@@ -503,6 +567,21 @@ static HANDLE game_state_open_persistent_storage(
+ 	return success ? file : INVALID_HANDLE_VALUE;
+ }
+ 
++/* port: the strings of a header read from a file end in it (the file is
++anyone's) */
++static void game_state_header_terminate(
++	void *header,
++	long header_size)
++{
++	if (header_size == sizeof(struct game_state_header))
++	{
++		struct game_state_header *game_state_header = header;
++
++		game_state_header->map_name[NUMBEROF(game_state_header->map_name) - 1] = 0;
++		game_state_header->build_number[NUMBEROF(game_state_header->build_number) - 1] = 0;
++	}
++}
++
+ boolean game_state_read_header_from_persistent_storage(
+ 	void *header,
+ 	unsigned long *header_checksum,
+@@ -530,6 +609,7 @@ boolean game_state_read_header_from_persistent_storage(
+ 			!ReadFile(file, header, header_size, &bytes_read, NULL) ||
+ 			bytes_read != header_size)
+ 		{
++			game_state_header_terminate(header, header_size);
+ 			match_vassert(
+ 				"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
+ 				298,
+@@ -541,6 +621,7 @@ boolean game_state_read_header_from_persistent_storage(
+ 		}
+ 		else
+ 		{
++			game_state_header_terminate(header, header_size);
+ 			stored_checksum = *header_checksum;
+ 
+ 			crc_new(&checksum);
+@@ -638,9 +719,14 @@ void game_state_read_from_persistent_storage(
+ 	file = game_state_open_persistent_storage(NULL);
+ 	if (file != INVALID_HANDLE_VALUE)
+ 	{
+-		if (SetFilePointer(file, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER ||
+-			!ReadFile(file, buffer, buffer_size, &bytes_read, NULL) ||
+-			bytes_read != buffer_size)
++		/* port: read beside the game state, and taken once checked */
++		void *image = malloc(buffer_size);
++
++		if (!image ||
++			SetFilePointer(file, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER ||
++			!ReadFile(file, image, buffer_size, &bytes_read, NULL) ||
++			bytes_read != buffer_size ||
++			!game_state_image_accept(image, buffer_size))
+ 		{
+ 			match_vassert(
+ 				"c:\\halo\\SOURCE\\saved games\\game_state_xbox.c",
+@@ -650,6 +736,8 @@ void game_state_read_from_persistent_storage(
+ 					GetLastError()));
+ 			delete_persistent_storage();
+ 		}
++		(void)buffer;
++		free(image);
+ 		CloseHandle(file);
+ 	}
+ 
 diff --git a/source/sound/game_sound.c b/source/sound/game_sound.c
 index 7081db00..6f4509ed 100644
 --- a/source/sound/game_sound.c

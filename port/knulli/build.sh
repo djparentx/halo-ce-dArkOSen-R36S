@@ -118,6 +118,15 @@ for source in port/third_party/miniupnpc/src/*.c; do
 	# shellcheck disable=SC2086
 	compile "$source" $MINIUPNPC
 done
+# internet play's DTLS with browsers (posix_dtls.c, with Mbed TLS), as the
+# Android app's host library has it
+MBEDTLS="-Iport/third_party/mbedtls/include -Iport/third_party/mbedtls/library"
+# shellcheck disable=SC2086
+compile port/linux/src/posix_dtls.c $MBEDTLS
+for source in port/third_party/mbedtls/library/*.c; do
+	# shellcheck disable=SC2086
+	compile "$source" $MBEDTLS -w
+done
 compile port/third_party/tomlc17/tomlc17.c -w
 compile build/android/host/host_import_table.c
 

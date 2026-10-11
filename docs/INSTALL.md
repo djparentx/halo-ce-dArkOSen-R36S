@@ -347,11 +347,13 @@ Updating from a version before co-op turns it on once; after that your
 choice is kept.
 
 Every machine in a game has to run the same network version, and the
-server browser lists only games of its own. From v2026.10.08 the handheld
-plays version 24, upstream's from 2026-10-08, with the PC and Android builds
-of that day on. When upstream raises the version again, the handheld needs a
-new release to see their games. A game on a Custom Edition map can't be
-joined from the handheld.
+server browser lists only games of its own. From v2026.10.11 the handheld
+plays version 26, upstream's from 2026-10-11, with the PC and Android builds
+of that day on, and with people playing OpenCE's web build in a browser: a
+browser connects over WebRTC, which the handheld answers (DTLS, with Mbed
+TLS). When upstream raises the version again, the handheld needs a new
+release to see their games. A game on a Custom Edition map can't be joined
+from the handheld.
 
 ## Changing settings
 
