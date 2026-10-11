@@ -52,6 +52,76 @@ index 5a9babaf..ea1f8b24 100644
  
  /* ---------- Android */
  
+diff --git a/port/android/guest/runtime/guest_string.c b/port/android/guest/runtime/guest_string.c
+new file mode 100644
+index 00000000..4e20b92a
+--- /dev/null
++++ b/port/android/guest/runtime/guest_string.c
+@@ -0,0 +1,64 @@
++/*
++GUEST_STRING.C
++
++memcmp and memcpy for the guest, eight bytes at a time. musl has no
++assembly versions of them for arm64_32, and its C versions go a byte (memcmp)
++or four bytes (memcpy) at a time. The renderer compares state of a few
++hundred bytes per draw (shader keys, uniform inputs), which made musl's
++memcmp about 6% of the game's thread on the Cortex-A53.
++
++These are found before libguestc.a's, whose memcmp.o and memcpy.o are then
++not linked. no_builtin keeps clang from turning the loops back into calls to
++the functions themselves.
++*/
++
++#include <string.h>
++#include <stdint.h>
++
++/* AArch64 loads and stores need no alignment */
++typedef uint64_t __attribute__((aligned(1), may_alias)) unaligned_u64;
++
++__attribute__((no_builtin)) int memcmp(const void *left, const void *right, size_t size)
++{
++	const unsigned char *l = left, *r = right;
++
++	for (; size >= 8; size -= 8, l += 8, r += 8)
++	{
++		uint64_t a = *(const unaligned_u64 *)l, b = *(const unaligned_u64 *)r;
++
++		if (a != b)
++		{
++			/* little-endian: the lowest byte that differs is the first */
++			unsigned int shift = (unsigned int)__builtin_ctzll(a ^ b) & ~7u;
++
++			return (int)((a >> shift) & 0xff) - (int)((b >> shift) & 0xff);
++		}
++	}
++	for (; size && *l == *r; size--, l++, r++)
++		;
++	return size ? *l - *r : 0;
++}
++
++__attribute__((no_builtin)) void *memcpy(void *restrict destination, const void *restrict source, size_t size)
++{
++	unsigned char *d = destination;
++	const unsigned char *s = source;
++
++	for (; size >= 16; size -= 16, d += 16, s += 16)
++	{
++		uint64_t a = ((const unaligned_u64 *)s)[0], b = ((const unaligned_u64 *)s)[1];
++
++		((unaligned_u64 *)d)[0] = a;
++		((unaligned_u64 *)d)[1] = b;
++	}
++	if (size >= 8)
++	{
++		*(unaligned_u64 *)d = *(const unaligned_u64 *)s;
++		size -= 8;
++		d += 8;
++		s += 8;
++	}
++	for (; size; size--)
++		*d++ = *s++;
++	return destination;
++}
 diff --git a/port/android/host/host.h b/port/android/host/host.h
 index eef727c6..76b097d8 100644
 --- a/port/android/host/host.h
@@ -1461,6 +1531,655 @@ index 454cbc01..7fee7a8e 100644
  		objects_host_inventories[absolute_index].carried_time = NONE;
  		objects_host_inventories[absolute_index].ammunition_time = NONE;
  		objects_client_has[absolute_index] = NONE;
+diff --git a/port/linux/game/spawn_menu.c b/port/linux/game/spawn_menu.c
+new file mode 100644
+index 00000000..918c3c98
+--- /dev/null
++++ b/port/linux/game/spawn_menu.c
+@@ -0,0 +1,610 @@
++/*
++SPAWN_MENU.C
++
++The spawn menu (port): vehicles, weapons, equipment and AI characters the
++loaded map has, placed in front of the player. Hold Back and press D-pad
++Down to open it; LB and RB change the page, Up and Down (or the left stick)
++pick, Left and Right pick a character's side, A spawns, B (or Back + Down)
++closes, Start closes and pauses. While it is open the game sees nothing of
++that controller (nor of the keyboard and mouse, when it is the first), so
++the player stands still; buttons held as it closes stay out of the game
++until they are let go. A map unloading closes it.
++
++It is the game's own: in single player, and for the host of a network game
++(co-op or multiplayer), never for a client in another's game, who plays by
++its host's rules. What it makes is made as the retail cheats make objects
++(cheat_all_weapons: object_placement_data_new, object_new), a character as
++a script's ai_attach_free makes an actor (actor_customize_unit arms the
++unit): so in a network game the host's objects and actors reach the
++clients as any other of the host's do (network_objects.c, network_actors.c),
++and nothing new is sent.
++
++After AlphaRing's Halo CE spawn menu (its mcc/spawn/halo1.cpp): the same
++pages and placement.
++*/
++
++#include "cseries.h"
++#include "ai/actor_definitions.h"
++#include "ai/actors.h"
++#include "ai/ai_script.h"
++#include "cache/cache_files.h"
++#include "cutscene/cinematics.h"
++#include "game/game.h"
++#include "game/players.h"
++#include "interface/interface.h"
++#include "interface/ui_widget.h"
++#include "items/equipment_definitions.h"
++#include "items/weapon_definitions.h"
++#include "objects/objects.h"
++#include "rasterizer/rasterizer.h"
++#include "render/render.h"
++#include "tag_files/tag_files.h"
++#include "tag_files/tag_groups.h"
++#include "text/draw_string.h"
++#include "text/font_group.h"
++#include "units/units.h"
++#include "units/vehicle_definitions.h"
++
++#include "spawn_menu.h"
++
++/* platform.h's */
++void platform_log(const char *format, ...);
++
++#include <ctype.h>
++#include <stdio.h>
++#include <string.h>
++#include <xtl.h>
++
++/* ---------- constants */
++
++enum
++{
++	_spawn_page_vehicles,
++	_spawn_page_weapons,
++	_spawn_page_equipment,
++	_spawn_page_characters,
++	NUMBER_OF_SPAWN_PAGES
++};
++
++/* (draw_string.c's, which no header has) */
++enum
++{
++	_text_justification_left = 0
++};
++
++enum
++{
++	_spawn_side_own,
++	_spawn_side_ally,
++	_spawn_side_enemy,
++	NUMBER_OF_SPAWN_SIDES
++};
++
++enum
++{
++	MAXIMUM_SPAWN_ITEMS = 256,
++	SPAWN_NAME_LENGTH = 40,
++	/* the list's rows shown at once */
++	SPAWN_VISIBLE_ROWS = 10,
++	/* a direction held: a step at once, then one each this many polls after
++	the first wait */
++	SPAWN_REPEAT_FIRST_POLLS = 20,
++	SPAWN_REPEAT_POLLS = 4,
++	/* the result shown for this many frames */
++	SPAWN_STATUS_FRAMES = 180,
++	/* an analog button or trigger counts as pressed past this */
++	SPAWN_ANALOG_PRESSED = 64,
++	SPAWN_STICK_PRESSED = 20000
++};
++
++/* the menu's own bits for what a pad holds: the digital buttons' bits as
++they are (XINPUT_GAMEPAD_DPAD_UP ...), the analog buttons' and triggers'
++above them */
++#define SPAWN_ANALOG_BIT(index) (0x0100u << (index))
++#define SPAWN_A SPAWN_ANALOG_BIT(XINPUT_GAMEPAD_A)
++#define SPAWN_B SPAWN_ANALOG_BIT(XINPUT_GAMEPAD_B)
++#define SPAWN_BLACK SPAWN_ANALOG_BIT(XINPUT_GAMEPAD_BLACK)  /* RB on later pads */
++#define SPAWN_WHITE SPAWN_ANALOG_BIT(XINPUT_GAMEPAD_WHITE)  /* LB on later pads */
++
++/* how far ahead of the player each page's things go, and how high */
++static real const spawn_distances[NUMBER_OF_SPAWN_PAGES] = { 5.0f, 1.5f, 1.5f, 3.0f };
++#define SPAWN_HEIGHT 0.8f
++
++static char const *const spawn_page_names[NUMBER_OF_SPAWN_PAGES] =
++{
++	"VEHICLES", "WEAPONS", "EQUIPMENT", "CHARACTERS"
++};
++static char const *const spawn_side_names[NUMBER_OF_SPAWN_SIDES] = { "THEIR OWN", "ALLY", "ENEMY" };
++
++/* ---------- globals */
++
++struct spawn_item
++{
++	long tag_index;
++	char name[SPAWN_NAME_LENGTH];
++};
++
++/* the local player (controller port) whose menu is open, else NONE */
++static short spawn_owner = NONE;
++/* the first controller's menu closed since the keyboard was last read */
++static boolean spawn_keyboard_closed;
++
++static struct
++{
++	short page;
++	short side;
++	short selection[NUMBER_OF_SPAWN_PAGES];
++	short counts[NUMBER_OF_SPAWN_PAGES];
++	struct spawn_item items[NUMBER_OF_SPAWN_PAGES][MAXIMUM_SPAWN_ITEMS];
++	/* a spawn asked for, made on the game's thread (spawn_menu_update) */
++	boolean request;
++	short request_page;
++	short request_side;
++	struct spawn_item request_item;
++	char status[64];
++	boolean status_failed;
++	long status_frames;
++} spawn_menu;
++
++/* each controller's buttons at its last poll, those kept from the game
++until let go, and its held direction's repeat */
++static struct spawn_pad
++{
++	unsigned long held;
++	unsigned long kept;
++	short direction;
++	short direction_polls;
++} spawn_pads[MAXIMUM_LOCAL_PLAYERS];
++
++/* ---------- private code */
++
++/* the player's unit, if the menu is the game's (single player, or the
++host's) and its player has a living one; local players are the gamepads'
++ports (player_control.c) */
++static long spawn_menu_player_unit(
++	short local_player)
++{
++	short connection = game_connection();
++	long player_index, unit_index;
++	struct unit_datum *unit;
++
++	if (connection != _game_connection_local && connection != _game_connection_network_server)
++		return NONE;
++	if (local_player < 0 || local_player >= MAXIMUM_LOCAL_PLAYERS || !game_in_progress() || main_menu_is_active() ||
++		cinematic_in_progress() || ui_widgets_active_for_local_player(local_player))
++	{
++		return NONE;
++	}
++	player_index = local_player_get_player_index(local_player);
++	if (player_index == NONE)
++		return NONE;
++	unit_index = player_get(player_index)->unit_index;
++	unit = unit_index == NONE ? NULL : unit_try_and_get(unit_index);
++	return unit && !TEST_FLAG(unit->object.damage_flags, _object_dead_bit) ? unit_index : NONE;
++}
++
++/* "vehicles\warthog\mp_warthog" -> "MP Warthog": the path's last part in
++words, a short word with no vowel in capitals */
++static void spawn_display_name(
++	char const *path,
++	char *name,
++	size_t size)
++{
++	char const *last = tag_name_strip_path(path);
++	size_t length = 0, word = 0, index;
++
++	for (; *last && length + 1 < size; last++)
++		name[length++] = *last == '_' ? ' ' : *last;
++	name[length] = 0;
++	for (index = 0; index <= length; index++)
++	{
++		if (name[index] != ' ' && name[index] != 0)
++			continue;
++		if (index > word)
++		{
++			size_t letter;
++			boolean vowel = FALSE;
++
++			for (letter = word; letter < index; letter++)
++				vowel |= strchr("aeiouyAEIOUY", name[letter]) != NULL;
++			for (letter = word; letter < index; letter++)
++			{
++				name[letter] = (char)(letter == word || (!vowel && index - word <= 3) ?
++					toupper((unsigned char)name[letter]) : name[letter]);
++			}
++		}
++		word = index + 1;
++	}
++}
++
++/* weapons nobody carries: a vehicle's or a turret's, or one built into a
++character */
++static boolean spawn_weapon_listed(
++	char const *path)
++{
++	return strncmp(path, "vehicles\\", 9) && strncmp(path, "characters\\", 11) && !strstr(path, "\\turret") &&
++		!strstr(path, "integrated");
++}
++
++/* an actor variant with a unit to put it in, and not a swarm's (which
++ai_attach_free refuses) */
++static boolean spawn_character_listed(
++	long tag_index)
++{
++	struct actor_variant_definition const *variant = actor_variant_definition_get(tag_index);
++	long actor_index = variant->actor_reference.index;
++
++	return variant->unit_reference.index != NONE && actor_index != NONE &&
++		!TEST_FLAG(actor_definition_get(actor_index)->flags, _actor_definition_swarm_actor_bit);
++}
++
++/* what the loaded map can spawn, each page sorted by name */
++static void spawn_catalog_build(
++	void)
++{
++	static long const groups[NUMBER_OF_SPAWN_PAGES] =
++	{
++		VEHICLE_DEFINITION_TAG, WEAPON_DEFINITION_TAG, EQUIPMENT_DEFINITION_TAG, ACTOR_VARIANT_DEFINITION_TAG
++	};
++	short page;
++
++	for (page = 0; page < NUMBER_OF_SPAWN_PAGES; page++)
++	{
++		struct spawn_item *items = spawn_menu.items[page];
++		struct tag_iterator iterator;
++		long tag_index;
++		short count = 0, index;
++
++		tag_iterator_new(&iterator, groups[page]);
++		while ((tag_index = tag_iterator_next(&iterator)) != NONE && count < MAXIMUM_SPAWN_ITEMS)
++		{
++			char const *path = tag_get_name(tag_index);
++
++			if (!path)
++				continue;
++			/* (a cutscene's props, not vehicles: b30's falling box) */
++			if (page == _spawn_page_vehicles && !strncmp(path, "cinematics\\", 11))
++				continue;
++			if (page == _spawn_page_weapons && !spawn_weapon_listed(path))
++				continue;
++			if (page == _spawn_page_characters && !spawn_character_listed(tag_index))
++				continue;
++			items[count].tag_index = tag_index;
++			spawn_display_name(path, items[count].name, sizeof(items[count].name));
++			for (index = count; index > 0 && csstrcasecmp(items[index - 1].name, items[index].name) > 0; index--)
++			{
++				struct spawn_item swap = items[index - 1];
++
++				items[index - 1] = items[index];
++				items[index] = swap;
++			}
++			count++;
++		}
++		spawn_menu.counts[page] = count;
++	}
++}
++
++/* a thing of definition_index in front of unit_index, on owner_team (NONE:
++its own); the new object, else NONE */
++static long spawn_object(
++	long definition_index,
++	long unit_index,
++	short page,
++	short owner_team)
++{
++	struct object_placement_data data;
++	real_point3d origin;
++	real_vector3d facing = unit_get(unit_index)->unit.desired_aiming_vector;
++
++	/* (ahead along the ground, where the player looks) */
++	facing.k = 0.0f;
++	if (normalize3d(&facing) < 0.001f)
++		facing = *global_forward3d;
++	object_get_origin(unit_index, &origin);
++	object_placement_data_new(&data, definition_index, NONE);
++	point_from_line3d(&origin, &facing, spawn_distances[page], &data.position);
++	data.position.z += SPAWN_HEIGHT;
++	data.forward = facing;
++	if (owner_team != NONE)
++		data.owner_team_index = owner_team;
++	return object_new(&data);
++}
++
++static void spawn_request_make(
++	void)
++{
++	long unit_index = spawn_menu_player_unit(spawn_owner);
++	short page = spawn_menu.request_page;
++	struct spawn_item const *item = &spawn_menu.request_item;
++	long object_index;
++	boolean failed;
++
++	spawn_menu.request = FALSE;
++	if (unit_index == NONE)
++		return;
++	if (page != _spawn_page_characters)
++	{
++		object_index = spawn_object(item->tag_index, unit_index, page, NONE);
++	}
++	else
++	{
++		long unit_definition_index = actor_variant_definition_get(item->tag_index)->unit_reference.index;
++		short player_team = unit_get(unit_index)->object.owner_team_index;
++		short team = NONE;
++
++		/* an ally on the player's own side (the human team is an ally only
++		where a level's script makes it one); an enemy on the other */
++		if (spawn_menu.request_side == _spawn_side_ally)
++			team = player_team;
++		else if (spawn_menu.request_side == _spawn_side_enemy)
++			team = player_team == _game_team_covenant ? _game_team_human : _game_team_covenant;
++		object_index = spawn_object(unit_definition_index, unit_index, page, team);
++		if (object_index != NONE)
++		{
++			struct unit_datum *spawned;
++
++			actor_customize_unit(item->tag_index, object_index);
++			ai_scripting_attach_free(object_index, item->tag_index);
++			/* (no actor, as when the actors are all in use: no armed statue
++			left standing, as actor_place deletes its unit then) */
++			spawned = unit_try_and_get(object_index);
++			if (!spawned || spawned->unit.actor_index == NONE)
++			{
++				if (spawned)
++					object_delete(object_index);
++				object_index = NONE;
++			}
++		}
++	}
++	failed = object_index == NONE;
++	snprintf(spawn_menu.status, sizeof(spawn_menu.status), "%s %s", failed ? "Couldn't spawn" : "Spawned", item->name);
++	spawn_menu.status_failed = failed;
++	spawn_menu.status_frames = SPAWN_STATUS_FRAMES;
++	platform_log("spawn menu: %s %s (%s)", failed ? "couldn't spawn" : "spawned", item->name,
++		tag_get_name(item->tag_index));
++}
++
++static void spawn_menu_close(
++	void)
++{
++	/* (what is held stays out of the game until let go) */
++	spawn_pads[spawn_owner].kept = spawn_pads[spawn_owner].held;
++	spawn_keyboard_closed |= spawn_owner == 0;
++	spawn_owner = NONE;
++	spawn_menu.request = FALSE;
++}
++
++static void spawn_menu_open(
++	short port)
++{
++	csmemset(spawn_menu.selection, 0, sizeof(spawn_menu.selection));
++	spawn_owner = port;
++	spawn_menu.status_frames = 0;
++	spawn_catalog_build();
++}
++
++/* -1 up, 1 down, or 0; then a step at once and repeated while held */
++static short spawn_vertical_step(
++	struct spawn_pad *state,
++	XINPUT_GAMEPAD const *pad)
++{
++	short direction = (pad->wButtons & XINPUT_GAMEPAD_DPAD_UP) || pad->sThumbLY > SPAWN_STICK_PRESSED ? -1 :
++		(pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN) || pad->sThumbLY < -SPAWN_STICK_PRESSED ? 1 : 0;
++
++	if (direction != state->direction)
++	{
++		state->direction = direction;
++		state->direction_polls = 0;
++		return direction;
++	}
++	if (!direction)
++		return 0;
++	state->direction_polls++;
++	if (state->direction_polls >= SPAWN_REPEAT_FIRST_POLLS &&
++		(state->direction_polls - SPAWN_REPEAT_FIRST_POLLS) % SPAWN_REPEAT_POLLS == 0)
++	{
++		return direction;
++	}
++	return 0;
++}
++
++static void spawn_pad_clear(
++	XINPUT_GAMEPAD *pad,
++	unsigned long bits)
++{
++	short index;
++
++	pad->wButtons &= (unsigned short)~(bits & 0xFF);
++	for (index = 0; index < 8; index++)
++	{
++		if (bits & SPAWN_ANALOG_BIT(index))
++			pad->bAnalogButtons[index] = 0;
++	}
++}
++
++/* ---------- public code */
++
++void spawn_menu_pad(
++	short port,
++	XINPUT_GAMEPAD *pad)
++{
++	struct spawn_pad *state;
++	unsigned long held = pad->wButtons & 0xFF, pressed;
++	boolean combo;
++	short index;
++
++	if (port < 0 || port >= MAXIMUM_LOCAL_PLAYERS)
++		return;
++	state = &spawn_pads[port];
++	for (index = 0; index < 8; index++)
++	{
++		if (pad->bAnalogButtons[index] > SPAWN_ANALOG_PRESSED)
++			held |= SPAWN_ANALOG_BIT(index);
++	}
++	pressed = held & ~state->held;
++	state->held = held;
++	combo = (held & XINPUT_GAMEPAD_BACK) && (pressed & XINPUT_GAMEPAD_DPAD_DOWN);
++
++	/* (not with Start pressed too: that pauses) */
++	if (spawn_owner == NONE && combo && !(pressed & XINPUT_GAMEPAD_START) && spawn_menu_player_unit(port) != NONE)
++	{
++		spawn_menu_open(port);
++		state->direction = 1;
++		state->direction_polls = 0;
++		csmemset(pad, 0, sizeof(*pad));
++		return;
++	}
++	if (spawn_owner != port)
++	{
++		state->kept &= held;
++		spawn_pad_clear(pad, state->kept);
++		return;
++	}
++
++	/* (a game left, the player dead, a cinematic or a menu begun: closed;
++	Start closes it and pauses, as it would have) */
++	if (combo || (pressed & (SPAWN_B | XINPUT_GAMEPAD_START)) || spawn_menu_player_unit(port) == NONE)
++	{
++		spawn_menu_close();
++		state->kept &= ~(unsigned long)XINPUT_GAMEPAD_START;
++		csmemset(pad, 0, sizeof(*pad));
++		pad->wButtons = (unsigned short)(held & XINPUT_GAMEPAD_START);
++		return;
++	}
++	if (pressed & SPAWN_WHITE)
++		spawn_menu.page = (short)((spawn_menu.page + NUMBER_OF_SPAWN_PAGES - 1) % NUMBER_OF_SPAWN_PAGES);
++	if (pressed & SPAWN_BLACK)
++		spawn_menu.page = (short)((spawn_menu.page + 1) % NUMBER_OF_SPAWN_PAGES);
++	{
++		short page = spawn_menu.page, count = spawn_menu.counts[page];
++		short step = spawn_vertical_step(state, pad);
++
++		if (count && step)
++			spawn_menu.selection[page] = (short)((spawn_menu.selection[page] + step + count) % count);
++		if (page == _spawn_page_characters && (pressed & (XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT)))
++		{
++			spawn_menu.side = (short)((spawn_menu.side +
++				((pressed & XINPUT_GAMEPAD_DPAD_LEFT) ? NUMBER_OF_SPAWN_SIDES - 1 : 1)) % NUMBER_OF_SPAWN_SIDES);
++		}
++		if ((pressed & SPAWN_A) && count && !spawn_menu.request)
++		{
++			spawn_menu.request = TRUE;
++			spawn_menu.request_page = page;
++			spawn_menu.request_item = spawn_menu.items[page][spawn_menu.selection[page]];
++			spawn_menu.request_side = spawn_menu.side;
++		}
++	}
++	csmemset(pad, 0, sizeof(*pad));
++}
++
++void spawn_menu_update(
++	void)
++{
++	if (spawn_menu.request)
++		spawn_request_make();
++}
++
++int spawn_menu_has(
++	short port)
++{
++	return spawn_owner != NONE && spawn_owner == port;
++}
++
++unsigned long spawn_menu_keyboard_actions(
++	unsigned long held)
++{
++	/* (those held while it was open, or as it closed: read after the poll
++	that closed it, so a key first pressed there too) */
++	static unsigned long kept;
++
++	kept = spawn_owner == 0 || spawn_keyboard_closed ? held : kept & held;
++	spawn_keyboard_closed = FALSE;
++	return held & ~kept;
++}
++
++void spawn_menu_dispose_from_old_map(
++	void)
++{
++	if (spawn_owner != NONE)
++		spawn_menu_close();
++}
++
++/* a line of text in the rows' left column (rasterizer_draw_string gives it
++a drop shadow) */
++static void spawn_menu_line(
++	rectangle2d const *area,
++	long font_index,
++	short line_height,
++	short row,
++	real_argb_color const *color,
++	char const *text)
++{
++	rectangle2d bounds = *area;
++
++	bounds.y0 = (short)(area->y0 + row * line_height);
++	bounds.y1 = (short)(bounds.y0 + line_height);
++	draw_string_set_draw_mode(font_index, NONE, _text_justification_left, 0, color);
++	rasterizer_draw_string(&bounds, NULL, NULL, 0, text);
++}
++
++void spawn_menu_draw(
++	void)
++{
++	long font_index = interface_get_tag_index(_interface_font_terminal);
++	struct font_header *font;
++	short line_height, page = spawn_menu.page, count = spawn_menu.counts[page];
++	short first, row, index;
++	rectangle2d area;
++	char line[96];
++
++	if (spawn_menu.status_frames > 0)
++		spawn_menu.status_frames--;
++	if (spawn_owner == NONE || font_index == NONE)
++		return;
++	font = font_definition_get(font_index);
++	line_height = (short)(font->ascending_height + font->descending_height + font->leading_height);
++	if (line_height <= 0)
++		return;
++	area = render.camera.window_bounds;
++	offset_rectangle2d(&area, -render.camera.viewport_bounds.x0, -render.camera.viewport_bounds.y0);
++	area.x0 = (short)(area.x0 + 24);
++	area.y0 = (short)(area.y0 + 48);
++
++	snprintf(line, sizeof(line), "SPAWN   < %s >   LB / RB", spawn_page_names[page]);
++	spawn_menu_line(&area, font_index, line_height, 0, global_real_argb_yellow, line);
++	row = 2;
++	if (!count)
++	{
++		spawn_menu_line(&area, font_index, line_height, row, global_real_argb_grey, "(none in this map)");
++	}
++	else
++	{
++		first = (short)MAX(0, MIN(spawn_menu.selection[page] - SPAWN_VISIBLE_ROWS / 2, count - SPAWN_VISIBLE_ROWS));
++		for (index = first; index < count && index < first + SPAWN_VISIBLE_ROWS; index++)
++		{
++			boolean selected = index == spawn_menu.selection[page];
++
++			snprintf(line, sizeof(line), "%s %s", selected ? ">" : " ", spawn_menu.items[page][index].name);
++			spawn_menu_line(&area, font_index, line_height, (short)(row + index - first),
++				selected ? global_real_argb_yellow : global_real_argb_white, line);
++		}
++		if (count > SPAWN_VISIBLE_ROWS)
++		{
++			snprintf(line, sizeof(line), "  %d of %d", spawn_menu.selection[page] + 1, count);
++			spawn_menu_line(&area, font_index, line_height, (short)(row + SPAWN_VISIBLE_ROWS), global_real_argb_grey,
++				line);
++		}
++	}
++	row = (short)(row + SPAWN_VISIBLE_ROWS + 2);
++	if (page == _spawn_page_characters)
++	{
++		snprintf(line, sizeof(line), "SIDE   < %s >   LEFT / RIGHT", spawn_side_names[spawn_menu.side]);
++		spawn_menu_line(&area, font_index, line_height, row++, global_real_argb_white, line);
++	}
++	spawn_menu_line(&area, font_index, line_height, row++, global_real_argb_grey, "A SPAWN    B CLOSE");
++	if (spawn_menu.status_frames > 0)
++	{
++		spawn_menu_line(&area, font_index, line_height, row, spawn_menu.status_failed ? global_real_argb_red :
++			global_real_argb_green, spawn_menu.status);
++	}
++}
+diff --git a/port/linux/game/spawn_menu.h b/port/linux/game/spawn_menu.h
+new file mode 100644
+index 00000000..94c92b4b
+--- /dev/null
++++ b/port/linux/game/spawn_menu.h
+@@ -0,0 +1,27 @@
++#ifndef __SPAWN_MENU_H
++#define __SPAWN_MENU_H
++
++/* port: the spawn menu (spawn_menu.c) */
++
++struct _XINPUT_GAMEPAD;
++
++/* each poll of a controller (port 0-3): opens the menu on Back + D-pad
++Down, drives it while open; the game sees nothing of a pad the menu has,
++nor of buttons held as it closed until they are let go */
++void spawn_menu_pad(short port, struct _XINPUT_GAMEPAD *pad);
++/* each frame on the game's thread (beside cheats_update): the spawn asked
++for */
++void spawn_menu_update(void);
++/* each frame's fullscreen overlays (interface_draw_fullscreen_overlays) */
++void spawn_menu_draw(void);
++/* whether the menu is open on the controller (port 0-3): the mouse, which
++plays as the first, stays out of the game while it is */
++int spawn_menu_has(short port);
++/* the keyboard's actions (it plays as the first controller) the game may
++see: none while the menu has the first controller, and those held as it
++closes not until they are let go */
++unsigned long spawn_menu_keyboard_actions(unsigned long held);
++/* game_dispose_from_old_map: closed, before its list's tags are gone */
++void spawn_menu_dispose_from_old_map(void);
++
++#endif
 diff --git a/port/linux/include/halo_linux_source_fixups.h b/port/linux/include/halo_linux_source_fixups.h
 index 8b048c13..80285de7 100644
 --- a/port/linux/include/halo_linux_source_fixups.h
@@ -8426,10 +9145,38 @@ index 23beb89c..45c93a44 100644
 +	return (int)length;
  }
 diff --git a/port/linux/src/xinput_sdl.c b/port/linux/src/xinput_sdl.c
-index a2e87267..2a1b1d51 100644
+index a2e87267..2dfcd8e0 100644
 --- a/port/linux/src/xinput_sdl.c
 +++ b/port/linux/src/xinput_sdl.c
-@@ -522,6 +522,7 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
+@@ -40,6 +40,7 @@ drive the controller.
+ #include "sdl_platform.h"
+ #include "port_config.h"
+ #include "halo_keyboard.h"
++#include "../game/spawn_menu.h"
+ 
+ #include <SDL3/SDL.h>
+ #include <math.h>
+@@ -145,7 +146,8 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
+ 	mouse_pending_y = 0.0f;
+ 	mouse_polls_unconsumed = 0;
+ 	pthread_mutex_unlock(&mouse_lock);
+-	if (x == 0.0f && y == 0.0f)
++	/* (dropped while the spawn menu has the first controller) */
++	if ((x == 0.0f && y == 0.0f) || spawn_menu_has(gamepad_index))
+ 		return FALSE;
+ 	*yaw = -x * scale * mouse_sensitivity();
+ 	*pitch = (invert ? y : -y) * scale * vertical_sensitivity;
+@@ -485,7 +487,8 @@ static void keyboard_controls(const struct platform_input_state *input, XINPUT_G
+ 
+ unsigned long halo_keyboard_actions(short controller_index)
+ {
+-	return controller_index == 0 ? keyboard_actions_held : 0;
++	/* (the spawn menu's while it has the first controller: spawn_menu.c) */
++	return controller_index == 0 ? spawn_menu_keyboard_actions(keyboard_actions_held) : 0;
+ }
+ 
+ /* A scroll of the wheel switches weapons once: it holds Y for WHEEL_PRESS_MS
+@@ -522,6 +525,7 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
  	static int checked;
  	static int seed = -1;
  	static int looking;
@@ -8437,7 +9184,7 @@ index a2e87267..2a1b1d51 100644
  	double t;
  
  	if (!checked)
-@@ -538,9 +539,39 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
+@@ -538,9 +542,39 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
  			seed = atoi(setting + 5);
  			looking = 1;
  		}
@@ -8477,7 +9224,7 @@ index a2e87267..2a1b1d51 100644
  	if (test_input_holding_action)
  	{
  		/* (standing still, the button held from a second on) */
-@@ -548,7 +579,6 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
+@@ -548,7 +582,6 @@ static void test_input_gamepad(XINPUT_GAMEPAD *pad)
  			pad->bAnalogButtons[XINPUT_GAMEPAD_X] = 255;
  		return;
  	}
@@ -8485,6 +9232,15 @@ index a2e87267..2a1b1d51 100644
  	if (looking)
  	{
  		pad->sThumbRX = (SHORT)(sin(t * 0.5) * 14000.0);
+@@ -875,6 +908,8 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
+ 		sdl_gamepad_state(port_gamepad(gamepads, count, port), &state->Gamepad);
+ 	}
+ 
++	/* (the spawn menu's while it is open: spawn_menu.c) */
++	spawn_menu_pad((short)port, &state->Gamepad);
+ 	if (memcmp(&state->Gamepad, &controllers[port].previous, sizeof(state->Gamepad)))
+ 	{
+ 		controllers[port].packet_number++;
 diff --git a/source/cache/cache_files.c b/source/cache/cache_files.c
 index 334bc0d7..5f7eee0f 100644
 --- a/source/cache/cache_files.c
@@ -8620,6 +9376,24 @@ index 9dfa3dfd..46a06290 100644
  #else
  #define match_assert(file, line, expr) if (!(expr)) { display_assert(#expr, MATCH_FILE(file), MATCH_LINE(line), TRUE); system_exit(-1); }
  #define match_vassert(file, line, expr, string) if (!(expr)) { display_assert(string, MATCH_FILE(file), MATCH_LINE(line), TRUE); system_exit(-1); }
+diff --git a/source/game/game.c b/source/game/game.c
+index b6ed1634..b77b1603 100644
+--- a/source/game/game.c
++++ b/source/game/game.c
+@@ -862,9 +862,13 @@ void game_precache_new_map(
+ 	return;
+ }
+ 
++void spawn_menu_dispose_from_old_map(void); /* port: port/linux/game/spawn_menu.c */
++
+ void game_dispose_from_old_map(
+ 	void)
+ {
++	/* port: the spawn menu closed, its list of the old map's tags dropped */
++	spawn_menu_dispose_from_old_map();
+ 	rasterizer_dispose_from_old_map();
+ 	game_state_dispose_from_old_map();
+ 	cheats_dispose_from_old_map();
 diff --git a/source/game/game_engine.c b/source/game/game_engine.c
 index 29800ae1..59f1831f 100644
 --- a/source/game/game_engine.c
@@ -9001,6 +9775,28 @@ index 7018047a..a822b921 100644
  					{
  						if (players_globals->local_player_triggered_switch !=
  							_local_player_triggered_switch_none &&
+diff --git a/source/interface/interface.c b/source/interface/interface.c
+index e0d616f8..e6492397 100644
+--- a/source/interface/interface.c
++++ b/source/interface/interface.c
+@@ -375,6 +375,8 @@ union argb_color *interface_get_rgb_color(
+ 	return color;
+ }
+ 
++void spawn_menu_draw(void); /* port: port/linux/game/spawn_menu.c */
++
+ void interface_draw_fullscreen_overlays(
+ 	void)
+ {
+@@ -382,6 +384,8 @@ void interface_draw_fullscreen_overlays(
+ 	interface_splitscreen_render();
+ 	hud_render_timer();
+ 	terminal_draw();
++	/* port: the spawn menu (Back + D-pad Down) */
++	spawn_menu_draw();
+ 	main_framerate_render();
+ 	render_debug_profile();
+ 
 diff --git a/source/interface/ui_widget_event_handler_functions.c b/source/interface/ui_widget_event_handler_functions.c
 index 45147d92..061f1f9b 100644
 --- a/source/interface/ui_widget_event_handler_functions.c
@@ -9038,7 +9834,7 @@ index 45147d92..061f1f9b 100644
  	if (saved_game_file_retrieve_last_used_multiplayer_map(map_name))
  	{
 diff --git a/source/main/main.c b/source/main/main.c
-index d258e3c1..952db1de 100644
+index d258e3c1..e86668c3 100644
 --- a/source/main/main.c
 +++ b/source/main/main.c
 @@ -2290,7 +2290,8 @@ static boolean main_framerate_throttle_enabled(
@@ -9059,6 +9855,19 @@ index d258e3c1..952db1de 100644
  	if (previous_counter.QuadPart && frequency.QuadPart)
  	{
  		seconds_elapsed = (real)((double)(counter.QuadPart - previous_counter.QuadPart) /
+@@ -3360,6 +3362,12 @@ void main_loop(
+ 				{
+ 					debug_keys_update();
+ 					cheats_update();
++					/* port: a spawn the spawn menu asked for */
++					{
++						extern void spawn_menu_update(void); /* port/linux/game/spawn_menu.c */
++
++						spawn_menu_update();
++					}
+ 					player_control_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+ 
+ 					connection = main_globals.connection;
 diff --git a/source/models/models.c b/source/models/models.c
 index f535e6ee..1535300d 100644
 --- a/source/models/models.c

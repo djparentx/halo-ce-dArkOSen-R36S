@@ -62,6 +62,11 @@ Captured on an Anbernic RG35XX H (640x480 screen).
 - First launch extracts `maps/` from your Xbox disc image on the handheld.
 - The handheld's own controls, read from EmulationStation's configuration.
 - Quit with the hotkey: hold MENU (or SELECT) and press START.
+- A spawn menu, after [AlphaRing](https://github.com/kirklandsig/AlphaRing)'s: the map's vehicles, weapons,
+  equipment and AI characters, placed in front of you. In single player and
+  for the host of a co-op or multiplayer game, never for a player who
+  joined: hold SELECT and press D-pad Down
+  ([Install: the spawn menu](docs/INSTALL.md#the-spawn-menu)).
 - Upstream's online play: the campaign in co-op and multiplayer, over the
   internet (a server browser of public games) or the local network, with
   the PC version's menus ([Install: playing online](docs/INSTALL.md#playing-online)).

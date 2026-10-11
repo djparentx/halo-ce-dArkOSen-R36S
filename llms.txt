@@ -26,7 +26,7 @@
 1. Download halo-ce-knulli-<version>.zip from https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/releases/latest and unzip it onto the SD card's share partition (the one with the roms folder). It adds roms/ports/Halo.sh and roms/ports/halo/.
 2. Put your own Xbox Halo disc image (.iso) in roms/ports/halo/.
 3. Launch from Ports. The first launch copies maps/ out of the disc image with its progress on the screen (about four minutes), then the game sets up its cache (about a minute, black screen).
-4. Quit: hold the hotkey (MENU or SELECT) and press START. Settings: halo/config.toml (display.render_scale, default 0.75). Log: halo/log.txt.
+4. Quit: hold the hotkey (MENU or SELECT) and press START. Spawn menu (vehicles, weapons, equipment, AI characters; single player and the host of a network game only): hold SELECT and press D-pad Down; L1/R1 change the page, B (bottom) spawns, A (right) closes. Settings: halo/config.toml (display.render_scale, default 0.75). Log: halo/log.txt.
 5. With PortMaster instead (Knulli or other firmware): put halo-ce-portmaster-<version>.zip in PortMaster's autoinstall folder, start PortMaster, then put the disc image in ports/halo/.
 
 ## Build

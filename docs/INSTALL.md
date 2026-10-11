@@ -21,6 +21,7 @@ Xbox game.
 - [The first launch](#the-first-launch)
 - [Playing](#playing)
 - [Controls](#controls)
+- [The spawn menu](#the-spawn-menu)
 - [Where things are](#where-things-are)
 - [What the launcher changes on the handheld](#what-the-launcher-changes-on-the-handheld)
 - [Playing online](#playing-online)
@@ -239,13 +240,38 @@ the bottom); what matters is the position.
 | L3, R3 (stick clicks, where the handheld has them) | left and right stick clicks | crouch, zoom |
 | D-pad | D-pad | |
 | START | start | pause menu |
-| SELECT | back | |
+| SELECT | back | with D-pad Down, the [spawn menu](#the-spawn-menu) |
 
 **To quit, hold the hotkey (MENU), or SELECT, and press START.** The game
 exits, and the launcher restores the clocks and returns to EmulationStation.
 
 If you have remapped the handheld's controls in EmulationStation, the game
 follows that mapping.
+
+## The spawn menu
+
+Hold SELECT and press D-pad Down during a game to open the spawn menu, after
+[AlphaRing](https://github.com/kirklandsig/AlphaRing)'s for The Master Chief Collection on PC: the vehicles, weapons, equipment and
+AI characters the loaded level has, placed in front of you. It works in
+single player and for the host of a co-op or multiplayer game. A player who
+joined someone else's game can't open it, so the host decides. What the host
+spawns reaches the other players as the host's other objects do; nothing new
+is sent over the network.
+
+| Handheld (RG35XX H) | In the menu |
+| --- | --- |
+| L1, R1 | the previous or next page: vehicles, weapons, equipment, characters |
+| D-pad Up and Down, or the left stick | pick |
+| D-pad Left and Right | a character's side: their own, an ally of yours, or an enemy |
+| B (bottom) | spawn |
+| A (right) | close |
+| START | close and pause |
+
+The menu names the buttons as the Xbox controller does (A spawns, B
+closes), as the game's own prompts do. While it is open you stand still.
+Each level lists only what it has loaded, so the lists change from level to
+level. An ally fights on your side, an enemy against you; "their own" keeps
+the character's own side (an Elite stays Covenant).
 
 ## Where things are
 

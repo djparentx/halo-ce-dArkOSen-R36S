@@ -26,6 +26,7 @@ File paths are relative to the upstream tree as `build.sh` prepares it
 - [The GL thread](#the-gl-thread)
 - [The Direct3D 8 renderer on OpenGL ES](#the-direct3d-8-renderer-on-opengl-es)
 - [Changes to the game's rasterizer](#changes-to-the-games-rasterizer)
+- [The spawn menu](#the-spawn-menu)
 - [Data flow](#data-flow)
 - [Source map](#source-map)
 
@@ -1200,6 +1201,38 @@ The port multiplies the size by `xgpu_model_detail_scale()`, which is
 `display.model_detail` times `display.render_scale`: objects switch to their
 simpler models sooner, and detail beyond the rendered pixels is not drawn.
 
+## The spawn menu
+
+`port/linux/game/spawn_menu.c`, after AlphaRing's Halo CE spawn menu
+(`src/mcc/spawn/halo1.cpp` in [AlphaRing](https://github.com/kirklandsig/AlphaRing)), lists the loaded map's
+vehicle, weapon, equipment and actor variant tags (`tag_iterator_next`) and
+places one in front of the player. It is the game's own: the gate is
+`game_connection()`, local or network server, checked when the menu opens
+and again when a spawn is made, so a client never has it. A spawn is made
+as the retail cheats make objects (`object_placement_data_new`,
+`object_new`), and a character as a script's `ai_attach_free` makes an
+actor (`actor_customize_unit`, `ai_scripting_attach_free`); a unit left
+without an actor is deleted. In a network game the host's objects and actors
+reach the clients as its others do, and nothing new is sent.
+
+Five hooks join it to the game:
+
+- `XInputGetState` (`port/linux/src/xinput_sdl.c`) passes each controller's
+  pad through `spawn_menu_pad`, which opens the menu on Back held with D-pad
+  Down pressed and, while it is open, takes the whole pad; buttons held as
+  it closes stay out of the game until they are let go. START closes it and
+  goes on to the game, which pauses.
+- `halo_keyboard_actions` and `halo_linux_mouse_look` give nothing for the
+  first controller while the menu has it, so the player stands still and
+  no script sees an action. (`director_inhibit_input`, which the cheats' Back
+  combos use, clears the player's input only after the scripts' action
+  tests have seen it.)
+- `main.c` makes a spawn asked for on the game's thread, beside
+  `cheats_update`.
+- `interface_draw_fullscreen_overlays` draws it after the console, in the
+  terminal font.
+- `game_dispose_from_old_map` closes it, so no old map's tag is spawned.
+
 ## Data flow
 
 The path of a frame's work, from the game's code to the screen:
@@ -1274,6 +1307,8 @@ between ticks, so the frame rate can exceed the tick rate.
 | `port/linux/src/nv2a_vsh.c`, `nv2a_psh.c` | Shader translation: outputs, constants, precision, blur | patched |
 | `port/linux/src/xbox_textures.c` | 16-bit texels, opacity | patched |
 | `port/linux/src/port_config.c` | The new settings | patched |
+| `port/linux/game/spawn_menu.c`, `.h` | The spawn menu | new |
+| `port/linux/src/xinput_sdl.c`, `source/interface/interface.c`, `source/main/main.c`, `source/game/game.c` | The spawn menu's hooks | patched |
 | `port/linux/src/xgpu.h`, `gl.h` | Shared declarations; the new GL functions | patched |
 | `tools/android_gl_stubs.py` | `guest_gl_before_call` in the generated stubs | patched |
 | `source/rasterizer/xbox/rasterizer_xbox_models.c` | Models sorted by shader | patched |
