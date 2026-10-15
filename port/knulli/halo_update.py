@@ -64,7 +64,10 @@ PARTIAL = "update.partial"
 CHECKED = os.path.join("save", "update-checked")
 UPDATED = 10
 STOPPED = 11
+# START's code on a standard pad; the H700 handhelds' is 311 (the kernel's
+# BTN_TR), as EmulationStation's configuration says (start_codes)
 BTN_START = 315
+H700_START = 311
 # (no input device can be read: nobody can answer)
 NO_INPUT = -1
 # what a check, a download or an install can fail with (the network's own
@@ -215,6 +218,32 @@ def wait_for_key(seconds):
     finally:
         for device in devices:
             os.close(device)
+
+
+def start_codes():
+    """the codes START sends: the standard one and the H700 handhelds' (also
+    with another pad connected, or no configuration: muOS), and those
+    EmulationStation's configuration of a connected pad names start (as
+    sdl_mapping.py reads it)"""
+    import xml.etree.ElementTree as ElementTree
+    import sdl_mapping
+    codes = {BTN_START, H700_START}
+    names = sdl_mapping.connected_names()
+    for path in sdl_mapping.CONFIGS:
+        try:
+            root = ElementTree.parse(path).getroot()
+        except (OSError, ValueError, LookupError, ElementTree.ParseError):
+            continue
+        for config in root.iter("inputConfig"):
+            if config.get("type") != "joystick" or config.get("deviceName") not in names:
+                continue
+            for entry in config.iter("input"):
+                if entry.get("name") == "start" and entry.get("type") == "button":
+                    try:
+                        codes.add(int(entry.get("code")))
+                    except (TypeError, ValueError):
+                        pass
+    return codes
 
 
 def sha256_of(path):
@@ -467,7 +496,7 @@ def main():
     if key == NO_INPUT:
         log("no buttons to answer with; playing")
         return 0
-    if key != BTN_START:
+    if key not in start_codes():
         log(f"{tag} not taken now")
         try:
             os.makedirs(os.path.dirname(declined), exist_ok=True)
