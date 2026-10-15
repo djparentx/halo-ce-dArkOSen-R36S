@@ -3,7 +3,7 @@
 Yes — Halo CE runs natively on the Anbernic RG35XX H (RG35XXH) under Knulli:
 60 fps in the menus and about 40 to 55 fps in campaign levels at the default
 render scale, and it plays online (co-op and multiplayer, with PCs and other
-handhelds). This repository is a native ARM64 (AArch64) port of the Halo:
+handhelds) and offline against bots. This repository is a native ARM64 (AArch64) port of the Halo:
 Combat Evolved decompilation, [OpenCE](https://github.com/OpenCommunityEdition/OpenCE)
 (formerly halo-ce-universal), to the Allwinner H700 and its Mali-G31 GPU. There is no emulation: no xemu,
 no Box64, no Wine. You need your own copy of the original Xbox game. This
@@ -39,11 +39,47 @@ data.
 
 Captured on an Anbernic RG35XX H (640x480 screen).
 
-| Main menu | The Silent Cartographer (b30), render scale 0.75 |
+### Bot Match: Slayer against bots, offline
+
+MULTIPLAYER > BOT MATCH sets how many bots join (1 to 15), how well they
+play (Easy to Legendary) and, in Team Slayer, whose side they are on. Then
+you pick the map and the game type, as in the Xbox's split screen, and play
+them on the handheld, with no network
+([Install: Bot Match](docs/INSTALL.md#bot-match)).
+
+| BOT MATCH, under Create Game | The bots' settings |
 | --- | --- |
-| ![Halo: Combat Evolved main menu running natively on an Anbernic RG35XX H under Knulli](docs/screenshots/main-menu.png) | ![Halo CE beach battle on The Silent Cartographer running on an Anbernic RG35XX H at 36 fps](docs/screenshots/b30-beach.png) |
-| **Server browser: public internet games** | **Online on Blood Gulch, a 23-player public game** |
+| ![The Halo CE Multiplayer menu on an Anbernic RG35XX H with the new BOT MATCH item](docs/screenshots/multiplayer-bot-match.png) | ![Halo CE Bot Match settings on an Anbernic RG35XX H: seven bots, skill and teams](docs/screenshots/bot-match-settings.png) |
+| **The lobby: you and seven bots on Blood Gulch** | **Two of the bots at the red base** |
+| ![Halo CE split screen lobby on an Anbernic RG35XX H with one player and seven bots, eight players on Blood Gulch](docs/screenshots/bot-match-lobby.png) | ![Halo CE Slayer against bots on Blood Gulch on an Anbernic RG35XX H: two bots at the red base](docs/screenshots/bot-match.png) |
+
+### The spawn menu
+
+Hold SELECT and press D-pad Down in a game: the level's vehicles, weapons,
+equipment and characters, placed in front of you, a character on your side
+or against you ([Install: the spawn menu](docs/INSTALL.md#the-spawn-menu)).
+
+| The Silent Cartographer (b30): the vehicles page | A Pelican it spawned on the beach |
+| --- | --- |
+| ![The Halo CE spawn menu on an Anbernic RG35XX H listing The Silent Cartographer's vehicles](docs/screenshots/spawn-menu.png) | ![A Pelican spawned with the Halo CE spawn menu on The Silent Cartographer's beach, on an Anbernic RG35XX H](docs/screenshots/spawn-menu-spawned.png) |
+
+### Updates on the handheld
+
+When a new release is out, the launcher offers it before the game starts.
+START downloads it from this repository's releases, checks it against the
+SHA-256 GitHub gives for it and installs it: your maps, saves and settings
+stay. Any other button plays the version you have, and that release isn't
+offered again ([Install: Updating](docs/INSTALL.md#updating)).
+
+![The Halo CE port's updater on an Anbernic RG35XX H offering a new release before the game starts](docs/screenshots/updater.png)
+
+### Online and the campaign
+
+| Server browser: public internet games | Online on Blood Gulch, a 23-player public game |
+| --- | --- |
 | ![Halo CE server browser on an Anbernic RG35XX H listing public internet games](docs/screenshots/server-browser.png) | ![Halo CE online multiplayer on Blood Gulch, sniper rifle zoomed on an enemy, on an Anbernic RG35XX H at 58 fps](docs/screenshots/blood-gulch-online.png) |
+| **Main menu** | **The Silent Cartographer (b30), render scale 0.75** |
+| ![Halo: Combat Evolved main menu running natively on an Anbernic RG35XX H under Knulli](docs/screenshots/main-menu.png) | ![Halo CE beach battle on The Silent Cartographer running on an Anbernic RG35XX H at 36 fps](docs/screenshots/b30-beach.png) |
 
 ## Features
 
@@ -62,6 +98,14 @@ Captured on an Anbernic RG35XX H (640x480 screen).
 - First launch extracts `maps/` from your Xbox disc image on the handheld.
 - The handheld's own controls, read from EmulationStation's configuration.
 - Quit with the hotkey: hold MENU (or SELECT) and press START.
+- Bot Match (MULTIPLAYER > BOT MATCH): Slayer and Team Slayer against up to
+  15 bots on the handheld, offline, their skill (Easy to Legendary) and
+  teams set in the menu ([Install: Bot Match](docs/INSTALL.md#bot-match)).
+  The bots are BirchWoodGod's, from the PS Vita port, contributed to
+  upstream.
+- Updates from the handheld: the launcher offers a new release before the
+  game starts, and START installs it
+  ([Install: Updating](docs/INSTALL.md#updating)).
 - A spawn menu, after [AlphaRing](https://github.com/kirklandsig/AlphaRing)'s: the map's vehicles, weapons,
   equipment and AI characters, placed in front of you. In single player and
   for the host of a co-op or multiplayer game, never for a player who
@@ -172,8 +216,9 @@ game's own first start then takes about a minute more with a black screen
 while it sets up its cache (the screen says so first); later starts take
 seconds. Instead of a disc image you can also copy an extracted Xbox `maps/`
 folder into `halo/`. To quit, hold the hotkey (MENU, or SELECT) and press
-START. To update, unzip a newer release over the old files: `maps/`,
-`save/` and `config.toml` stay.
+START. New releases are offered by the launcher before the game starts
+(START installs one); a newer release unzipped over the old files works
+too: `maps/`, `save/` and `config.toml` stay.
 
 With PortMaster (on Knulli or another firmware) instead: put
 `halo-ce-portmaster-<version>.zip` in PortMaster's `autoinstall` folder and
@@ -191,7 +236,9 @@ The resulting layout:
     ├── halo_extract.py
     ├── halo_screen.py
     ├── sdl_mapping.py
+    ├── halo_update.py   the updater the launcher runs
     ├── config.default.toml
+    ├── VERSION          the release installed
     ├── brokers.txt      internet play's signalling brokers
     ├── config.toml      written at the first launch
     ├── log.txt          the log of the last launch
@@ -323,8 +370,9 @@ launcher's defaults for the handheld:
 | `display.interpolation` | `true` | Draws a frame for every display refresh, blending between the game's 30 ticks a second; `false` keeps 30 fps. |
 | `display.frame_pacing` | `true` | Shows each frame at the display refresh it was drawn for, so that most frames show the world as it is when they are seen. |
 | `display.vsync` | `true` | Waits for the display between frames. |
-| `update.auto` | `false` | The upstream updater, which fetches upstream's builds rather than this port's; off. |
+| `update.auto` | `true` | The launcher's updater: a new release of this port is offered before the game starts (SETTINGS > NETWORK SETUP > CHECK FOR UPDATES). |
 | `network.online` | `true` | Internet play: the server browser, hosting and joining. It connects only while you use them. |
+| `bots.count` | `7` | How many bots join a Bot Match, with `bots.skill` and `bots.teams`; BOT MATCH's screen sets them. |
 
 Environment variables such as `HALO_RENDER_SCALE=0.6` override a setting for
 one run. Every setting is described in
@@ -370,11 +418,11 @@ the halo-ce-universal decompilation; you supply the Xbox game's data.
 
 ### What frame rate does Halo CE get on the RG35XX H?
 
-At the default render scale of 0.75: 60 fps in the menus, about 40 fps on
-343 Guilty Spark (c10, 31 to 44), about 40 fps in the beach battle of The
-Silent Cartographer (b30), and about 55 fps at the opening of Halo (a30).
-At the full 640x480 it is about 24 to 40 fps. The numbers are improving;
-see the [performance table](#performance).
+At the default render scale of 0.75: 60 fps in the menus, about 57 fps on
+343 Guilty Spark (c10), about 43 in the beach battle of The Silent
+Cartographer (b30) and about 59 at the opening of Halo (a30). At the full
+640x480 it is about 38 to 56 fps. The ranges are in the
+[performance table](#performance).
 
 ### Does it work with the Xbox version or the PC version of Halo?
 
@@ -439,6 +487,15 @@ SP working, its 3:2 screen filled with `screen_width = 0`
 ([#1](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/1)). TrimUI handhelds and other SoCs are not
 supported.
 
+### Can I play against bots?
+
+Yes, offline: MULTIPLAYER > BOT MATCH plays Slayer or Team Slayer against
+up to 15 computer players on the handheld alone, at Easy, Normal, Heroic or
+Legendary ([Install: Bot Match](docs/INSTALL.md#bot-match)). The bots are
+BirchWoodGod's, from the PS Vita port, contributed to upstream OpenCE (in
+review there). They play in Bot Match only: not online, not on a LAN, and
+not in other game types.
+
 ## Legal notice
 
 This is an unofficial fan project. It is not affiliated with, endorsed by or
@@ -458,6 +515,12 @@ original Xbox game. Details: [docs/LEGAL.md](docs/LEGAL.md).
   ports, on which this port is built. It starts from
   [bnunu/halo-1](https://github.com/bnunu/halo-1), a fork of
   [punpckhdq/halo](https://github.com/punpckhdq/halo).
+- [BirchWoodGod](https://github.com/BirchWoodGod): the bots, from the
+  [PS Vita port](https://github.com/BirchWoodGod/halo-ce-vita),
+  contributed to upstream under CC0
+  ([OpenCE #367](https://github.com/OpenCommunityEdition/OpenCE/pull/367)).
+- [AlphaRing](https://github.com/kirklandsig/AlphaRing): the spawn menu's
+  design, after its menu for The Master Chief Collection.
 - Bungie, who made Halo: Combat Evolved. Halo is a trademark of Microsoft
   Corporation.
 - [SDL](https://www.libsdl.org/) (zlib licence): the headers are used at build

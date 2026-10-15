@@ -541,6 +541,14 @@ level that did not before. In a30's Pelican both builds hold about 50 fps
 at the same scale, with the release now and then a five seconds' window
 at 60: frame pacing turns a little more time a frame into a lower step.
 
+The bots (upstream's PR #367, Multiplayer's BOT MATCH) cost nothing outside
+a game with bots: against the same build without them, the warm second
+runs gave a30 52.3 and 51.9 against 52.3, b30 49.3 and 48.9 against 49.0.
+A local Slayer game on Blood Gulch (`debug.network_test = "local:..."`,
+90 s, the samples after the first) holds 59.5 with no bots and 59.4 with
+seven Heroic ones: the game's thread has room for their searches and aim
+there.
+
 ## Upstream's game logic for many enemies (2026-10-06)
 
 Upstream's commit 197c1994 sped up its many-enemy co-op games (484 actors,

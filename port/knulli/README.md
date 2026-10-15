@@ -11,7 +11,7 @@ Wayland, DRM or Vulkan), which the firmware's SDL2 drives.
 
 1. Take the files from a [release](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/releases/latest),
    or build the port (below) and take `halo`, `halo_guest.elf`,
-   `halo_extract.py`, `halo_screen.py` and `sdl_mapping.py`.
+   `halo_extract.py`, `halo_screen.py`, `halo_update.py` and `sdl_mapping.py`.
 2. Copy them into `/userdata/roms/ports/halo/`, and `Halo.sh` into
    `/userdata/roms/ports/`.
 3. Put an Xbox disc image of Halo (`.iso`) in `/userdata/roms/ports/halo/`.
@@ -60,7 +60,7 @@ replaced or added:
 | `host/host_profile.c`, `profile.py` | A sampling profiler (`HALO_PROFILE_HZ`). |
 | `host/host_gl_timing.c`, `.S` | A timer of the driver's functions (`HALO_GL_TIMING`). |
 | `compat/android/log.h` | The NDK's log functions, to the standard error stream. |
-| `Halo.sh`, `sdl_mapping.py`, `halo_extract.py`, `halo_screen.py` | The launcher: the controls, the clocks, the first start's maps, and messages on the screen while the game is not running. |
+| `Halo.sh`, `sdl_mapping.py`, `halo_extract.py`, `halo_screen.py`, `halo_update.py` | The launcher: the controls, the clocks, the first start's maps, updates, and messages on the screen while the game is not running. |
 
 ### The GL thread
 
@@ -202,6 +202,26 @@ What goes wrong (no image, not an Xbox one, an incomplete one, no room) is
 said on the screen until a button is pressed. Before the game's own first
 start, which sets up its cache in `save/z` for about a minute with the
 screen black, the screen says so.
+
+### Updates
+
+Before the game starts, `halo_update.py` asks GitHub for this port's latest
+release (once in six hours at most, `save/update-checked`; 8 s at most,
+nothing without a network) and compares its tag with the installed
+`VERSION`, which a release's zip holds: a build of one's own has none and
+is never updated. A newer one is offered on the screen. START downloads the
+zip of the same kind (Knulli's, or PortMaster's for its launcher), checks
+its size and the SHA-256 GitHub gives for it, and installs it as a
+transaction: each file written beside its place, then `update.journal`
+names the release and the zip kept in `update.partial/`, then the files
+are moved in, `VERSION` last. A start that finds the journal finishes the
+install from the kept zip, or the latest release downloaded again, before
+anything else, and the launcher starts no game while the journal is there.
+`maps/`, `save/`, `custom_maps/` and `config.toml` are never touched. Any
+other button, or 30 seconds, plays the installed version, and that release
+is not offered again (`save/update-declined`). `update.auto = false` turns
+it off. Exit status 10 makes the launcher start itself again (the new
+one); 11 stops it.
 
 ### Clocks
 

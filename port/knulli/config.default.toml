@@ -8,7 +8,7 @@ high_res_hud = false
 high_res_text = false
 
 [update]
-auto = false
+auto = true
 
 [network]
 online = true

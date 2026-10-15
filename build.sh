@@ -91,7 +91,7 @@ fi
 # names are longer in a full clone than in this shallow one.
 tree_is_patched() {
 	[ "$(git -C "$SRC" rev-parse HEAD 2> /dev/null || true)" = "$UPSTREAM_COMMIT" ] &&
-		cmp -s <(git -C "$SRC" diff HEAD | grep -v '^index ') <(grep -v '^index ' "$PATCH")
+		cmp -s <(git -C "$SRC" diff --binary HEAD | grep -v '^index ') <(grep -v '^index ' "$PATCH")
 }
 if ! tree_is_patched; then
 	echo "== checking out $UPSTREAM_COMMIT and applying $(basename "$PATCH")"
@@ -162,7 +162,7 @@ SDL2_INCLUDE=$SDL2_INCLUDE SYSROOT_LIB=$SYSROOT_LIB ANDROID_NDK=$ANDROID_NDK GLI
 # ---------- dist: what goes on the handheld
 
 install -m 755 build/knulli/halo build/knulli/halo_guest.elf port/knulli/Halo.sh port/knulli/halo_extract.py \
-	port/knulli/halo_screen.py port/knulli/sdl_mapping.py "$DIST/"
+	port/knulli/halo_screen.py port/knulli/sdl_mapping.py port/knulli/halo_update.py "$DIST/"
 install -m 644 port/knulli/config.default.toml port/assets/network/brokers.txt "$DIST/"
 echo "== done: $DIST"
 ls -l "$DIST"

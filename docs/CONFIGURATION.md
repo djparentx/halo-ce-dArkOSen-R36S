@@ -18,6 +18,7 @@ variables at the end are for measuring and developing the port
 - [Renderer switches](#renderer-switches)
 - [Sound and language](#sound-and-language)
 - [Network and updates](#network-and-updates)
+- [Bots](#bots)
 - [Diagnostics](#diagnostics)
 - [Environment variables outside config.toml](#environment-variables-outside-configtoml)
 - [Settings the handheld build ignores](#settings-the-handheld-build-ignores)
@@ -120,8 +121,11 @@ launcher writes another value, the table says so.
 | [`audio.enabled`](#sound-and-language) | boolean | `true` | | `HALO_NO_AUDIO` (set is false) |
 | [`audio.volume`](#sound-and-language) | real | `1.0` | | `HALO_VOLUME` (value) |
 | [`game.language`](#sound-and-language) | string | `""` | | `HALO_LANGUAGE` (value) |
-| [`network.online`](#network-and-updates) | boolean | `true` | `false` | `HALO_NET_ONLINE` (value) |
-| [`update.auto`](#network-and-updates) | boolean | `true` | `false` | `HALO_UPDATE_AUTO` (value) |
+| [`network.online`](#network-and-updates) | boolean | `true` | `true` | `HALO_NET_ONLINE` (value) |
+| [`update.auto`](#network-and-updates) | boolean | `true` | `true` | (the launcher reads the file) |
+| [`bots.count`](#bots) | integer | `7` | | `HALO_BOTS` (value) |
+| [`bots.skill`](#bots) | string | `"normal"` | | `HALO_BOT_SKILL` (value) |
+| [`bots.teams`](#bots) | string | `"even"` | | `HALO_BOT_TEAMS` (value) |
 | [`network.*`, others](#network-and-updates) | | | | |
 | [`debug.*`, upstream's](#diagnostics) | | | | |
 
@@ -567,8 +571,10 @@ The host opens SDL2's audio device with a buffer of 1024 sample frames;
 
 ## Network and updates
 
-The launcher turns off upstream's updater and leaves internet play on, as
-upstream has it (updating from a version before co-op turns it on once). The
+`update.auto` is the launcher's updater's (upstream's own is not in the
+handheld build), and internet play is on, as upstream has it. Updating
+from a version before co-op turns internet play on once, and from one
+before v2026.10.15 the updater. The
 network settings are upstream's; the PC menus' Server Setup and Settings
 write several of them. [Install: playing online](INSTALL.md#playing-online)
 describes playing.
@@ -576,7 +582,7 @@ describes playing.
 | Setting | Type | Default | Launcher | Variable | Effect |
 | --- | --- | --- | --- | --- | --- |
 | `network.online` | boolean | `true` | `true` | `HALO_NET_ONLINE` | Internet play: hosting makes an invite link and, if public, a server browser listing; off keeps system link to the local network. Connects only while hosting, joining or browsing. |
-| `update.auto` | boolean | `true` | `false` | `HALO_UPDATE_AUTO` | Upstream's updater, which looks for a new version of upstream's builds, not of this port. Keep it off. |
+| `update.auto` | boolean | `true` | `true` | | The launcher's updater (`halo_update.py`): before the game starts, a newer release of this port is offered, and START installs it ([Install: Updating](INSTALL.md#updating)). `false` never looks. SETTINGS > NETWORK SETUP > CHECK FOR UPDATES. |
 | `network.public_lobby` | boolean | `true` | | `HALO_NET_PUBLIC_LOBBY` | The server browser: list this machine's public games and show others'. |
 | `network.host_public` | boolean | `true` | | `HALO_NET_HOST_PUBLIC` | Whether a new internet multiplayer game starts PUBLIC. |
 | `network.coop_public` | boolean | `false` | | `HALO_NET_COOP_PUBLIC` | Whether a new online co-op game starts PUBLIC. |
@@ -594,6 +600,19 @@ describes playing.
 | `network.map_download` | boolean | `true` | | `HALO_NET_MAP_DOWNLOAD` | Joining a game on a Custom Edition map this machine lacks: download it, and the resource maps it needs, from the game's players. |
 | `network.map_share` | boolean | `true` | | `HALO_NET_MAP_SHARE` | Hosting: send the game's Custom Edition map to players who lack it. |
 | `network.map_seed` | boolean | `true` | | `HALO_NET_MAP_SEED` | Playing in another's game: send its map on to other players who are downloading it. |
+
+## Bots
+
+The bots of a Bot Match (MULTIPLAYER > BOT MATCH, whose screen writes
+these: [Install: Bot Match](INSTALL.md#bot-match)). They join only a game
+of this machine alone, in Slayer or Team Slayer.
+
+| Setting | Type | Default | Variable | Effect |
+| --- | --- | --- | --- | --- |
+| `bots.count` | integer | `7` | `HALO_BOTS` | How many join the lobby, 0 to 15, as far as the game has room. |
+| `bots.skill` | string | `"normal"` | `HALO_BOT_SKILL` | `"easy"`, `"normal"`, `"heroic"` or `"legendary"`: how soon they react, how well they aim, how far they see. |
+| `bots.teams` | string | `"even"` | `HALO_BOT_TEAMS` | In team games: `"even"` puts bots on both teams, evening them with the players; `"against"` puts them all on the team the players are not on. |
+| `debug.bot_trace` | integer | `0` | `HALO_BOT_TRACE` | Each bot's state in the log every this many seconds: where it is and goes, its path, target and weapon; 0 never. |
 
 ## Diagnostics
 

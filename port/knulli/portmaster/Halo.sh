@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# This launcher by its full path, before anything changes the folder: the
+# updater replaces it, and it starts itself again.
+LAUNCHER="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 
 if [ -d "/opt/system/Tools/PortMaster/" ]; then
@@ -58,6 +62,36 @@ fi
 if [ ! -e save/online-on ]; then
   sed -i '/^[[:space:]]*\[network\]/,/^[[:space:]]*\[/ s/^\([[:space:]]*online[[:space:]]*=[[:space:]]*\)false/\1true/' config.toml &&
     mkdir -p save && : > save/online-on
+fi
+
+# The updater on, once (it was upstream's before); Settings, Network Setup,
+# CHECK FOR UPDATES turns it off.
+if [ ! -e save/update-on ]; then
+  sed -i '/^[[:space:]]*\[update\]/,/^[[:space:]]*\[/ s/^\([[:space:]]*auto[[:space:]]*=[[:space:]]*\)false/\1true/' config.toml &&
+    mkdir -p save && : > save/update-on
+fi
+
+# A newer release offered (halo_update.py); once one is installed, the new
+# launcher starts instead, and after an install that stopped part way (the
+# files a mix) no game starts.
+if [ -z "${HALO_UPDATED:-}" ]; then
+  python3 halo_update.py "$GAMEDIR" "$LAUNCHER" portmaster
+  case $? in
+  10)
+    export HALO_UPDATED=1
+    exec bash "$LAUNCHER"
+    ;;
+  11)
+    exit 1
+    ;;
+  esac
+fi
+# (One left unfinished another way, the updater stopped: the same.)
+if [ -e update.journal ]; then
+  python3 halo_screen.py wait 60 "Update not finished" "The last update stopped part way, so Halo can't start. Start Halo again with an internet connection to finish it, or unzip the latest release over the files.
+
+Press a button to go back."
+  exit 1
 fi
 
 # The first start sets up the game's cache with a black screen for about a minute.

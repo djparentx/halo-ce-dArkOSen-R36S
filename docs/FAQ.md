@@ -1,6 +1,6 @@
 # Halo CE on the RG35XX H: frequently asked questions
 
-The first nine questions are the same as in the [README](../README.md#faq).
+The first ten questions are the same as in the [README](../README.md#faq).
 
 ## Can the Anbernic RG35XX H run Halo: Combat Evolved?
 
@@ -10,11 +10,11 @@ the halo-ce-universal decompilation; you supply the Xbox game's data.
 
 ## What frame rate does Halo CE get on the RG35XX H?
 
-At the default render scale of 0.75: 60 fps in the menus, about 40 fps on
-343 Guilty Spark (c10, 31 to 44), about 40 fps in the beach battle of The
-Silent Cartographer (b30), and about 55 fps at the opening of Halo (a30).
-At the full 640x480 it is about 24 to 40 fps. The numbers are improving;
-see the [performance table](../README.md#performance).
+At the default render scale of 0.75: 60 fps in the menus, about 57 fps on
+343 Guilty Spark (c10), about 43 in the beach battle of The Silent
+Cartographer (b30) and about 59 at the opening of Halo (a30). At the full
+640x480 it is about 38 to 56 fps. The ranges are in the
+[performance table](../README.md#performance).
 
 ## Does it work with the Xbox version or the PC version of Halo?
 
@@ -76,6 +76,15 @@ It should work on the other Allwinner H700 handhelds that run Knulli: the
 Anbernic RG35XX Plus, SP and 2024, RG40XX H and V, RG CubeXX and RG34XX.
 Only the RG35XX H has been tested. TrimUI handhelds and other SoCs are not
 supported.
+
+## Can I play against bots?
+
+Yes, offline: MULTIPLAYER > BOT MATCH plays Slayer or Team Slayer against
+up to 15 computer players on the handheld alone, at Easy, Normal, Heroic or
+Legendary ([Install: Bot Match](INSTALL.md#bot-match)). The bots are
+BirchWoodGod's, from the PS Vita port, contributed to upstream OpenCE (in
+review there). They play in Bot Match only: not online, not on a LAN, and
+not in other game types.
 
 ## How do I quit the game?
 

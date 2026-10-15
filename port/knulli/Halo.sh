@@ -12,6 +12,7 @@
 # Hold the hotkey (MENU or SELECT) and push START to quit.
 
 GAMEDIR="$(cd "$(dirname "$0")/halo" && pwd)"
+LAUNCHER="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$GAMEDIR" || exit 1
 # one start at a time (or development run, tools/device/run.sh), before the
 # log starts again: another meanwhile would take the raised clocks for the
@@ -129,6 +130,37 @@ fi
 if [ ! -e save/online-on ]; then
 	sed -i '/^[[:space:]]*\[network\]/,/^[[:space:]]*\[/ s/^\([[:space:]]*online[[:space:]]*=[[:space:]]*\)false/\1true/' config.toml &&
 		mkdir -p save && : > save/online-on
+fi
+
+# the updater on, once for an install whose settings the launcher wrote with
+# it off (it was upstream's then, which fetched upstream's builds); the
+# player's choice after that stays (Settings, Network Setup, CHECK FOR UPDATES)
+if [ ! -e save/update-on ]; then
+	sed -i '/^[[:space:]]*\[update\]/,/^[[:space:]]*\[/ s/^\([[:space:]]*auto[[:space:]]*=[[:space:]]*\)false/\1true/' config.toml &&
+		mkdir -p save && : > save/update-on
+fi
+
+# a newer release offered (halo_update.py: START installs it, maps, saves and
+# settings kept); once one is installed, the new launcher starts instead, and
+# after an install that stopped part way (the files a mix) no game starts
+if [ -z "${HALO_UPDATED:-}" ]; then
+	supervised python3 halo_update.py "$GAMEDIR" "$LAUNCHER" knulli
+	case $? in
+	10)
+		export HALO_UPDATED=1
+		exec bash "$LAUNCHER"
+		;;
+	11)
+		exit 1
+		;;
+	esac
+fi
+# (one left unfinished another way, the updater stopped: the same)
+if [ -e update.journal ]; then
+	supervised python3 halo_screen.py wait 60 "Update not finished" "The last update stopped part way, so Halo can't start. Start Halo again with an internet connection to finish it, or unzip the latest release over the files.
+
+Press a button to go back."
+	exit 1
 fi
 
 # the handheld's own controls (SDL2 would take them for another pad)

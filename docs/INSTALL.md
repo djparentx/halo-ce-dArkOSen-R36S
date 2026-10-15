@@ -22,6 +22,7 @@ Xbox game.
 - [Playing](#playing)
 - [Controls](#controls)
 - [The spawn menu](#the-spawn-menu)
+- [Bot Match](#bot-match)
 - [Where things are](#where-things-are)
 - [What the launcher changes on the handheld](#what-the-launcher-changes-on-the-handheld)
 - [Playing online](#playing-online)
@@ -277,6 +278,30 @@ Each level lists only what it has loaded, so the lists change from level to
 level. An ally fights on your side, an enemy against you; "their own" keeps
 the character's own side (an Elite stays Covenant).
 
+## Bot Match
+
+MULTIPLAYER > BOT MATCH, under Create Game, plays Slayer against computer
+players on the handheld alone, with no network:
+
+1. Set the bots. BOTS: how many, 1 to 15. SKILL: Easy, Normal, Heroic or
+   Legendary (how soon they react, how well they aim, how far they see).
+   TEAMS, for Team Slayer: EVEN puts bots on both teams, evening them with
+   you; VS YOU puts them all on the other team. DEFAULTS sets 7, Normal,
+   Even. OK goes on.
+2. Choose the map, then the game type. The bots play Slayer and Team
+   Slayer, the built-in ones and those you made in Edit Gametypes; in
+   another kind of game (Capture the Flag, Oddball, King of the Hill, Race)
+   no bot joins.
+3. In the lobby (Enlisted Players), press A to join; the bots join with
+   you. A starts the match, X holds the countdown, B goes back.
+
+After the match, the carnage report's A picks the next map and game type,
+and B there goes back to the main menu. The settings are kept in
+`config.toml` (`bots.count`, `bots.skill`, `bots.teams`:
+[Configuration](CONFIGURATION.md#bots)). You are the game's host, so the
+[spawn menu](#the-spawn-menu) works in a Bot Match too. Bots play only in
+Bot Match: not in internet or LAN games.
+
 ## Where things are
 
 Everything the game writes is in `/userdata/roms/ports/halo/`:
@@ -416,6 +441,26 @@ effect, is in [Configuration](CONFIGURATION.md). To go back to the
 launcher's values, delete `config.toml`; the next launch writes it again.
 
 ## Updating
+
+From v2026.10.15 on, the launcher looks for a new release when you start
+Halo, once in six hours at most (a few seconds, and not at all without a
+network). When there is one, it says so on the screen before the game
+starts:
+
+- START downloads the new release's zip for your install (the Knulli zip,
+  or the PortMaster zip with PortMaster) from this repository's releases,
+  checks it against the SHA-256 GitHub gives for it, puts its files in
+  place of the old ones and starts the new version. `maps/`, `save/`,
+  `custom_maps/` and `config.toml` are kept. A download that fails or
+  doesn't match changes nothing.
+- Any other button, or 30 seconds, plays the version you have. That
+  release isn't offered again; the next one is.
+
+SETTINGS > NETWORK SETUP > CHECK FOR UPDATES turns the check off
+(`update.auto`). An install built from source has no `VERSION` file and is
+never offered one.
+
+By hand, and from a version before v2026.10.15:
 
 1. Unzip the new release's zip ([latest release](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/releases/latest)) over the old
    files, replacing them; or, from a build, copy the files as in
