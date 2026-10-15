@@ -94,7 +94,7 @@ compile() {
 	objects="$objects $object"
 }
 
-for source in host_debug host_gl host_loader host_memory host_syscall host_thread; do
+for source in host_debug host_gl host_loader host_memory host_syscall host_thread host_watch_hash; do
 	compile port/android/host/$source.c
 done
 compile port/knulli/host/host_main.c
@@ -104,6 +104,7 @@ compile port/knulli/host/host_gl_timing.c
 compile port/knulli/host/host_gl_timing.S
 # the GL thread's recording functions, from the functions the guest imports
 python3 port/knulli/glthread_gen.py build/android/guest/gen/gl_imports.list "$KHRONOS/GLES3/gl32.h" \
+	"$KHRONOS/GLES2/gl2ext.h" \
 	"$OUT/host_glthread_gen.c.new"
 cmp -s "$OUT/host_glthread_gen.c.new" "$OUT/host_glthread_gen.c" || mv "$OUT/host_glthread_gen.c.new" "$OUT/host_glthread_gen.c"
 rm -f "$OUT/host_glthread_gen.c.new"

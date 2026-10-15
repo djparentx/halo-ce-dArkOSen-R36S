@@ -108,6 +108,14 @@ static void *handle_get(uint32_t handle, int type)
 	return object;
 }
 
+/* a gamepad's handle and the controller freed (the game's handle then reads
+nothing) */
+static void gamepad_close(SDL_GameController *gamepad)
+{
+	handle_release(gamepad);
+	SDL_GameControllerClose(gamepad);
+}
+
 /* ---------- general */
 
 int host_sdl_init(uint32_t flags)
@@ -447,14 +455,10 @@ static int translate(const SDL_Event *event, struct host_event *result)
 	{
 		SDL_GameController *gamepad = SDL_GameControllerFromInstanceID(event->cdevice.which);
 
-		/* its buttons let go, its handle and the controller freed (the
-		game's handle then reads nothing) */
+		/* its buttons let go, and it closed */
 		*buttons_held(event->cdevice.which) = 0;
 		if (gamepad)
-		{
-			handle_release(gamepad);
-			SDL_GameControllerClose(gamepad);
-		}
+			gamepad_close(gamepad);
 		result->kind = _host_event_gamepad_removed;
 		result->which = (uint32_t)event->cdevice.which;
 		return 1;
@@ -618,6 +622,15 @@ int host_sdl_rumble_gamepad(uint32_t gamepad, uint32_t low, uint32_t high, uint3
 	return object ? SDL_GameControllerRumble(object, (Uint16)low, (Uint16)high, milliseconds) == 0 : 0;
 }
 
+/* (the game closes a gamepad that was removed) */
+void host_sdl_close_gamepad(uint32_t gamepad)
+{
+	SDL_GameController *object = handle_get(gamepad, _handle_gamepad);
+
+	if (object)
+		gamepad_close(object);
+}
+
 /* ---------- audio
 
 SDL2 pulls audio with a callback on its own thread; the guest's stream
@@ -636,6 +649,8 @@ struct audio_binding
 	pthread_cond_t done;
 	int pending;
 	int additional;
+	/* the stream destroyed: the worker is to end (it clears this as it does) */
+	int stopping;
 	unsigned char *buffer;
 	int buffer_length;
 	int buffer_size;
@@ -650,8 +665,16 @@ static void *audio_thread(void *context)
 	{
 		int additional;
 
-		while (!binding->pending)
+		while (!binding->pending && !binding->stopping)
 			pthread_cond_wait(&binding->requested, &binding->lock);
+		if (binding->stopping)
+		{
+			/* (nothing of the binding is touched once this unlocks) */
+			binding->stopping = 0;
+			pthread_cond_signal(&binding->done);
+			pthread_mutex_unlock(&binding->lock);
+			return NULL;
+		}
 		additional = binding->additional;
 		pthread_mutex_unlock(&binding->lock);
 		host_call_guest(binding->callback, binding->userdata, binding->handle, (uint32_t)additional,
@@ -707,6 +730,9 @@ static void SDLCALL audio_callback(void *userdata, Uint8 *stream, int length)
 	pthread_mutex_unlock(&binding->lock);
 }
 
+/* SDL3's default recording device: voice chat's microphone */
+#define SDL3_AUDIO_DEVICE_DEFAULT_RECORDING 0xfffffffeu
+
 /* SDL3's SDL_AudioSpec */
 struct sdl3_audio_spec
 {
@@ -718,11 +744,21 @@ struct sdl3_audio_spec
 uint32_t host_sdl_open_audio_stream(uint32_t device, const void *spec, uint32_t callback, uint32_t userdata)
 {
 	const struct sdl3_audio_spec *guest_spec = spec;
-	struct audio_binding *binding = SDL_calloc(1, sizeof(*binding));
+	struct audio_binding *binding;
 	SDL_AudioSpec wanted, obtained;
 	const char *setting = getenv("HALO_AUDIO_SAMPLES");
+	static int no_microphone;
 
-	(void)device;
+	/* (the handhelds have no microphone, and SDL2 would open the speaker
+	for it; voice chat asks again every ten seconds) */
+	if (device == SDL3_AUDIO_DEVICE_DEFAULT_RECORDING)
+	{
+		if (!no_microphone)
+			host_logf(HOST_LOG_INFO, "no microphone: voice chat listens only");
+		no_microphone = 1;
+		return 0;
+	}
+	binding = SDL_calloc(1, sizeof(*binding));
 	binding->callback = callback;
 	binding->userdata = userdata;
 	pthread_mutex_init(&binding->lock, NULL);
@@ -782,6 +818,44 @@ int host_sdl_resume_audio_stream_device(uint32_t stream)
 		return 0;
 	SDL_PauseAudioDevice(binding->device, 0);
 	return 1;
+}
+
+/* (a recording stream's, which is never made: host_sdl_open_audio_stream) */
+int host_sdl_get_audio_stream_data(uint32_t stream, void *data, int length)
+{
+	(void)stream;
+	(void)data;
+	(void)length;
+	return 0;
+}
+
+int host_sdl_get_audio_stream_available(uint32_t stream)
+{
+	(void)stream;
+	return 0;
+}
+
+/* the stream's device closed and its worker ended. The binding is kept: a
+producer may hold it, from a lookup of the handle just before */
+void host_sdl_destroy_audio_stream(uint32_t stream)
+{
+	struct audio_binding *binding = handle_get(stream, _handle_audio);
+
+	if (!binding)
+		return;
+	handle_release(binding);
+	/* (SDL2 waits for a callback under way, which waits for the worker: the
+	worker is idle from here on) */
+	SDL_CloseAudioDevice(binding->device);
+	pthread_mutex_lock(&binding->lock);
+	if (binding->callback)
+	{
+		binding->stopping = 1;
+		pthread_cond_signal(&binding->requested);
+		while (binding->stopping)
+			pthread_cond_wait(&binding->done, &binding->lock);
+	}
+	pthread_mutex_unlock(&binding->lock);
 }
 
 /* ---------- the clipboard (internet play's invite links): the process's own */

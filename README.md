@@ -4,8 +4,8 @@ Yes — Halo CE runs natively on the Anbernic RG35XX H (RG35XXH) under Knulli:
 60 fps in the menus and about 40 to 55 fps in campaign levels at the default
 render scale, and it plays online (co-op and multiplayer, with PCs and other
 handhelds). This repository is a native ARM64 (AArch64) port of the Halo:
-Combat Evolved decompilation, [halo-ce-universal](https://github.com/cybersecurity/halo-ce-universal),
-to the Allwinner H700 and its Mali-G31 GPU. There is no emulation: no xemu,
+Combat Evolved decompilation, [OpenCE](https://github.com/OpenCommunityEdition/OpenCE)
+(formerly halo-ce-universal), to the Allwinner H700 and its Mali-G31 GPU. There is no emulation: no xemu,
 no Box64, no Wine. You need your own copy of the original Xbox game. This
 repository has the source code, the documentation, and ready-made
 [releases](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/releases/latest) that need only your disc image: they hold no game
@@ -70,6 +70,10 @@ Captured on an Anbernic RG35XX H (640x480 screen).
 - Upstream's online play: the campaign in co-op and multiplayer, over the
   internet (a server browser of public games) or the local network, with
   the PC version's menus ([Install: playing online](docs/INSTALL.md#playing-online)).
+- Upstream's Halo Custom Edition maps, beside the Xbox game's: the
+  community's multiplayer and campaign maps in `halo/custom_maps/`. Joining
+  a game on one you don't have downloads it from the game's players
+  ([Install: Custom Edition maps](docs/INSTALL.md#custom-edition-maps)).
 
 ## Performance
 
@@ -376,7 +380,8 @@ see the [performance table](#performance).
 
 The Xbox version. The decompilation is of the Xbox build, and it reads the
 Xbox maps. The PC version (Gearbox's port) has different map files that this
-code cannot load. Use a disc image of the original Xbox game.
+code cannot load. Use a disc image of the original Xbox game. Halo Custom
+Edition's maps run beside it ([Install: Custom Edition maps](docs/INSTALL.md#custom-edition-maps)).
 
 ### Is this legal?
 

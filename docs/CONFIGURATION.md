@@ -559,6 +559,8 @@ every shader with `debug.gpu_dump_shaders`.
 | `audio.enabled` | boolean | `true` | `HALO_NO_AUDIO` (set is false) | Play sound. |
 | `audio.volume` | real | `1.0` | `HALO_VOLUME` | The volume of everything, 0.0 to 1.0. The handheld's own volume control applies on top. |
 | `game.language` | string | `""` | `HALO_LANGUAGE` | The language the game asks the Xbox for: `"ja"`, `"de"`, `"fr"`, `"es"` or `"it"`; empty for English. The game data decides what is translated. |
+| `audio.voice_chat` | string | `"push_to_talk"` | `HALO_VOICE_CHAT` | Upstream's voice chat. The handhelds have no microphone: the host refuses one, and nothing is sent. |
+| `audio.voice_volume` | real | `1.0` | `HALO_VOICE_VOLUME` | The volume of other players' voices. |
 
 The host opens SDL2's audio device with a buffer of 1024 sample frames;
 `HALO_AUDIO_SAMPLES` changes it ([below](#environment-variables-outside-configtoml)).
@@ -588,6 +590,10 @@ describes playing.
 | `network.allow_upnp` | boolean | `true` | | `HALO_NET_ALLOW_UPNP` | Let internet play ask the router to forward its port. |
 | `network.brokers_file` | string | `"brokers.txt"` | | `HALO_NET_BROKERS_FILE` | The public MQTT brokers through which the machines of a game find each other, beside `config.toml`. |
 | `network.stun_servers` | string | two public STUN servers | | `HALO_NET_STUN` | Servers that tell the machine its internet address. |
+| `game.custom_edition` | boolean | `true` | | `HALO_CUSTOM_EDITION` | Load and run Halo Custom Edition maps from `custom_maps/` ([Install: Custom Edition maps](INSTALL.md#custom-edition-maps)); `false` refuses them. |
+| `network.map_download` | boolean | `true` | | `HALO_NET_MAP_DOWNLOAD` | Joining a game on a Custom Edition map this machine lacks: download it, and the resource maps it needs, from the game's players. |
+| `network.map_share` | boolean | `true` | | `HALO_NET_MAP_SHARE` | Hosting: send the game's Custom Edition map to players who lack it. |
+| `network.map_seed` | boolean | `true` | | `HALO_NET_MAP_SEED` | Playing in another's game: send its map on to other players who are downloading it. |
 
 ## Diagnostics
 

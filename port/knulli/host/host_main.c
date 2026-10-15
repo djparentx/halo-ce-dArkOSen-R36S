@@ -138,6 +138,39 @@ void host_android_path(int which, char *buffer, uint32_t size)
 	snprintf(buffer, size, "%s", which ? save_root : data_root);
 }
 
+/* ---------- Android's gestures and the touch controls: none here */
+
+void host_gesture_insets(int *insets)
+{
+	memset(insets, 0, 4 * sizeof(*insets));
+}
+
+void host_touch_read(int *state)
+{
+	memset(state, 0, 7 * sizeof(*state));
+}
+
+void host_touch_look_read(float *delta)
+{
+	memset(delta, 0, 4 * sizeof(*delta));
+}
+
+void host_touch_rumble(uint32_t low, uint32_t high)
+{
+	(void)low;
+	(void)high;
+}
+
+void host_touch_scene(int scene)
+{
+	(void)scene;
+}
+
+void host_touch_bindings(const int *controls)
+{
+	(void)controls;
+}
+
 static void find_executable_root(void)
 {
 	ssize_t length = readlink("/proc/self/exe", executable_root, sizeof(executable_root) - 1);

@@ -246,7 +246,11 @@ the bottom); what matters is the position.
 exits, and the launcher restores the clocks and returns to EmulationStation.
 
 If you have remapped the handheld's controls in EmulationStation, the game
-follows that mapping.
+follows that mapping. It reads Batocera's and Knulli's names for the
+controls and those of ArkOS and EmuELEC. A firmware whose EmulationStation
+names the face buttons by the Xbox layout gets A and B (and X and Y) swapped:
+an empty file named `no_face_swap` in `roms/ports/halo/` takes them as they
+are named. The PortMaster zip uses PortMaster's own mapping instead.
 
 ## The spawn menu
 
@@ -284,6 +288,7 @@ Everything the game writes is in `/userdata/roms/ports/halo/`:
 | `config.toml` | The settings ([Configuration](CONFIGURATION.md)). |
 | `init.txt` | Optional: console commands run at start-up, one per line. For example `map_name levels\b30\b30` starts The Silent Cartographer directly. |
 | `maps/` | The extracted game data. |
+| `custom_maps/` | Halo Custom Edition maps and their resource maps, yours and those downloaded in online games ([Custom Edition maps](#custom-edition-maps)). |
 | `save/` | The game's writable Xbox drives, each a folder named after its drive letter, with the saved games and player profiles. |
 | `save/shaders/` | The compiled shader programs. Safe to delete; they are compiled again. |
 | `profile.txt` | Only when profiling ([Profiling](PROFILING.md)). |
@@ -347,13 +352,39 @@ Updating from a version before co-op turns it on once; after that your
 choice is kept.
 
 Every machine in a game has to run the same network version, and the
-server browser lists only games of its own. From v2026.10.11 the handheld
-plays version 26, upstream's from 2026-10-11, with the PC and Android builds
-of that day on, and with people playing OpenCE's web build in a browser: a
-browser connects over WebRTC, which the handheld answers (DTLS, with Mbed
-TLS). When upstream raises the version again, the handheld needs a new
-release to see their games. A game on a Custom Edition map can't be joined
-from the handheld.
+server browser lists only games of its own. From v2026.10.15 the handheld
+plays version 29, upstream's from 2026-10-14 (build 206), with the PC and
+Android builds of that day on, and with people playing OpenCE's web build in
+a browser: a browser connects over WebRTC, which the handheld answers (DTLS,
+with Mbed TLS). When upstream raises the version again, the handheld needs a
+new release to see their games. A game on a Custom Edition map can be
+joined: the map comes from the game's players
+([Custom Edition maps](#custom-edition-maps)).
+
+Upstream's voice chat needs a microphone to talk, which the handhelds don't
+have: the handheld doesn't send any voice.
+
+## Custom Edition maps
+
+Halo Custom Edition's maps run beside the Xbox game's, with upstream's
+loader: the community's multiplayer maps, and campaign maps. They need
+Custom Edition's three resource maps.
+
+1. Copy `bitmaps.map`, `sounds.map` and `loc.map` into
+   `roms/ports/halo/custom_maps/` (the game makes the folder at its first
+   start). They are in the `maps` folder of a Halo Custom Edition install on
+   a PC, or in `halo1/maps/custom_edition/` of Halo: The Master Chief
+   Collection on PC (not the files directly in `halo1/maps`).
+2. Copy the maps (`.map`) into the same folder.
+
+The maps are listed as CUSTOM MULTIPLAYER and CUSTOM SINGLEPLAYER. Maps that
+need OpenSauce don't run. Online, joining a game on a Custom Edition map you
+don't have downloads it from the game's players into `custom_maps`, with the
+resource maps it needs (`network.map_download = false` turns that off), and a
+game you host on one is shared with the players who lack it
+(`network.map_share`). Download only from players you trust. A map larger
+than the stock ones takes more memory, which the handheld shares with
+EmulationStation.
 
 ## Changing settings
 

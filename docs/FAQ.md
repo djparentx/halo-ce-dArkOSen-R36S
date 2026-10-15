@@ -20,7 +20,8 @@ see the [performance table](../README.md#performance).
 
 The Xbox version. The decompilation is of the Xbox build, and it reads the
 Xbox maps. The PC version (Gearbox's port) has different map files that this
-code cannot load. Use a disc image of the original Xbox game.
+code cannot load. Use a disc image of the original Xbox game. Halo Custom
+Edition's maps run beside it ([Install: Custom Edition maps](INSTALL.md#custom-edition-maps)).
 
 ## Is this legal?
 
