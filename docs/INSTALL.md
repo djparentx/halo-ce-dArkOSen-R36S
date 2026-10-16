@@ -266,14 +266,19 @@ is sent over the network.
 | Handheld (RG35XX H) | In the menu |
 | --- | --- |
 | L1, R1 | the previous or next page: vehicles, weapons, equipment, characters |
-| D-pad Up and Down, or the left stick | pick |
+| D-pad Up and Down, or the left stick's up and down | pick |
+| Left stick left and right | step to the side, the menu open |
+| Right stick | turn, the menu open |
 | D-pad Left and Right | a character's side: their own, an ally of yours, or an enemy |
 | B (bottom) | spawn |
 | A (right) | close |
 | START | close and pause |
 
 The menu names the buttons as the Xbox controller does (A spawns, B
-closes), as the game's own prompts do. While it is open you stand still.
+closes), as the game's own prompts do. While it is open you can step left
+and right and turn, so that what you spawn lands in a new place each time
+rather than on top of the last; you don't walk forward or back, fire or
+jump until it closes.
 Each level lists only what it has loaded, so the lists change from level to
 level. An ally fights on your side, an enemy against you; "their own" keeps
 the character's own side (an Elite stays Covenant).

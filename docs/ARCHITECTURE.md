@@ -1219,11 +1219,13 @@ Five hooks join it to the game:
 
 - `XInputGetState` (`port/linux/src/xinput_sdl.c`) passes each controller's
   pad through `spawn_menu_pad`, which opens the menu on Back held with D-pad
-  Down pressed and, while it is open, takes the whole pad; buttons held as
-  it closes stay out of the game until they are let go. START closes it and
+  Down pressed and, while it is open, takes the pad but for the left
+  stick's left and right and the right stick (the player steps to the side
+  and turns, so that what is spawned can be spread out); buttons held as it
+  closes stay out of the game until they are let go. START closes it and
   goes on to the game, which pauses.
 - `halo_keyboard_actions` and `halo_linux_mouse_look` give nothing for the
-  first controller while the menu has it, so the player stands still and
+  first controller while the menu has it (the player moves only by the pad's sticks), and
   no script sees an action. (`director_inhibit_input`, which the cheats' Back
   combos use, clears the player's input only after the scripts' action
   tests have seen it.)

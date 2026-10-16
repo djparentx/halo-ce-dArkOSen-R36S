@@ -5218,10 +5218,10 @@ index 149023f0..cf607e98 100644
  		{
 diff --git a/port/linux/game/spawn_menu.c b/port/linux/game/spawn_menu.c
 new file mode 100644
-index 00000000..918c3c98
+index 00000000..426617b4
 --- /dev/null
 +++ b/port/linux/game/spawn_menu.c
-@@ -0,0 +1,610 @@
+@@ -0,0 +1,621 @@
 +/*
 +SPAWN_MENU.C
 +
@@ -5229,10 +5229,12 @@ index 00000000..918c3c98
 +loaded map has, placed in front of the player. Hold Back and press D-pad
 +Down to open it; LB and RB change the page, Up and Down (or the left stick)
 +pick, Left and Right pick a character's side, A spawns, B (or Back + Down)
-+closes, Start closes and pauses. While it is open the game sees nothing of
-+that controller (nor of the keyboard and mouse, when it is the first), so
-+the player stands still; buttons held as it closes stay out of the game
-+until they are let go. A map unloading closes it.
++closes, Start closes and pauses. While it is open the game sees only the
++sticks' sideways moves and the right stick of that controller (nothing of
++the keyboard and mouse, when it is the first): the player steps to the
++side and turns, so that what is spawned can be spread out, but its buttons
++and the left stick's up and down are the menu's; buttons held as it closes
++stay out of the game until they are let go. A map unloading closes it.
 +
 +It is the game's own: in single player, and for the host of a network game
 +(co-op or multiplayer), never for a client in another's game, who plays by
@@ -5718,7 +5720,16 @@ index 00000000..918c3c98
 +			spawn_menu.request_side = spawn_menu.side;
 +		}
 +	}
-+	csmemset(pad, 0, sizeof(*pad));
++	{
++		/* (the player steps to the side and turns: the left stick's up and
++		down are the menu's) */
++		SHORT strafe = pad->sThumbLX, look_x = pad->sThumbRX, look_y = pad->sThumbRY;
++
++		csmemset(pad, 0, sizeof(*pad));
++		pad->sThumbLX = strafe;
++		pad->sThumbRX = look_x;
++		pad->sThumbRY = look_y;
++	}
 +}
 +
 +void spawn_menu_update(
@@ -5881,7 +5892,7 @@ index feb6789b..faf0693b 100644
  /* the port's menus' screen for one of ui.map's, by name, else the name
  (port/linux/game/menu_tags.c) */
 diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
-index 9e260d75..a413a246 100644
+index 9e260d75..34db86fc 100644
 --- a/port/linux/src/d3d8_gl.c
 +++ b/port/linux/src/d3d8_gl.c
 @@ -28,8 +28,11 @@ Conventions carried over from the Xbox:
@@ -8460,11 +8471,10 @@ index 9e260d75..a413a246 100644
  			if (stage == 0)
  			{
  				key->coverage_alpha = description.hires_coverage != FALSE;
-@@ -3405,44 +4893,73 @@ static void bind_textures(struct nv2a_pixel_shader_key *key, float texture_scale
- 				gl_target == GL_TEXTURE_3D ? _xgpu_sampler_3d : _xgpu_sampler_2d;
+@@ -3406,23 +4894,31 @@ static void bind_textures(struct nv2a_pixel_shader_key *key, float texture_scale
  		}
  	}
--#ifdef HALO_GLES
+ #ifdef HALO_GLES
 -	/* (a stage the pixel shader does not sample keeps what it had: unbinding
 -	it, to bind it again at the next draw that has it, is two calls) */
  	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
@@ -8479,7 +8489,50 @@ index 9e260d75..a413a246 100644
 +			configure_sampler(stage, levels[stage] > 1, bound_hires[stage]);
 +		}
  	}
--#else
+ #else
+ 	{
+ 		/* the units whose texture changes, bound in one call (GL 4.4's
+-		multi-bind) rather than selecting and binding each unit; binding no
+-		texture unbinds all of the unit's targets */
++		multi-bind, upstream's desktop path); binding no texture unbinds all
++		of the unit's targets; a frozen stage keeps what it had */
++		GLuint wanted[D3DTSS_MAXSTAGES];
++		boolean frozen = debug_frozen("textures");
+ 		int first = -1, last = -1;
+ 
+ 		for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
+ 		{
+-			if (gl_state.textures[stage][texture_slot(gl_targets[stage])] != gl_textures[stage])
++			int slot = texture_slot(textures[stage] ? targets[stage] : GL_TEXTURE_2D);
++
++			wanted[stage] = textures[stage] && frozen ? gl_state.textures[stage][slot] : textures[stage];
++			if (gl_state.textures[stage][slot] != wanted[stage])
+ 			{
+ 				if (first < 0)
+ 					first = stage;
+@@ -3431,18 +4927,79 @@ static void bind_textures(struct nv2a_pixel_shader_key *key, float texture_scale
+ 		}
+ 		if (first >= 0)
+ 		{
+-			glBindTextures((GLuint)first, (GLsizei)(last - first + 1), &gl_textures[first]);
++			glBindTextures((GLuint)first, (GLsizei)(last - first + 1), &wanted[first]);
+ 			for (stage = first; stage <= last; stage++)
+ 			{
+-				if (gl_textures[stage])
+-					gl_state.textures[stage][texture_slot(gl_targets[stage])] = gl_textures[stage];
++				if (wanted[stage])
++					gl_state.textures[stage][texture_slot(targets[stage])] = wanted[stage];
+ 				else
+ 					memset(gl_state.textures[stage], 0, sizeof(gl_state.textures[stage]));
+ 			}
+ 		}
++		for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
++		{
++			if (textures[stage] && !frozen)
++				configure_sampler(stage, levels[stage] > 1, bound_hires[stage]);
++		}
+ 	}
+ #endif
 +	return TRUE;
 +}
 +
@@ -8518,33 +8571,9 @@ index 9e260d75..a413a246 100644
 +	}
 +	/* no combiner writes the register's alpha */
 +	for (index = 0; index < combiners && index < 8; index++)
- 	{
--		/* the units whose texture changes, bound in one call (GL 4.4's
--		multi-bind) rather than selecting and binding each unit; binding no
--		texture unbinds all of the unit's targets */
--		int first = -1, last = -1;
++	{
 +		DWORD alpha = state[D3DRS_PSALPHAOUTPUTS0 + index], rgb = state[D3DRS_PSRGBOUTPUTS0 + index];
- 
--		for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
--		{
--			if (gl_state.textures[stage][texture_slot(gl_targets[stage])] != gl_textures[stage])
--			{
--				if (first < 0)
--					first = stage;
--				last = stage;
--			}
--		}
--		if (first >= 0)
--		{
--			glBindTextures((GLuint)first, (GLsizei)(last - first + 1), &gl_textures[first]);
--			for (stage = first; stage <= last; stage++)
--			{
--				if (gl_textures[stage])
--					gl_state.textures[stage][texture_slot(gl_targets[stage])] = gl_textures[stage];
--				else
--					memset(gl_state.textures[stage], 0, sizeof(gl_state.textures[stage]));
--			}
--		}
++
 +		if ((alpha & 0x0f) == reg || ((alpha >> 4) & 0x0f) == reg || ((alpha >> 8) & 0x0f) == reg)
 +			return FALSE;
 +		if ((((rgb >> 12) & 0x80) && ((rgb >> 4) & 0x0f) == reg) || (((rgb >> 12) & 0x40) && (rgb & 0x0f) == reg))
@@ -8558,14 +8587,13 @@ index 9e260d75..a413a246 100644
 +	case D3DCMP_NOTEQUAL: return reference != 255;
 +	case D3DCMP_EQUAL: return reference == 255;
 +	default: return FALSE;
- 	}
--#endif
++	}
  }
 +#endif
  
  static GLenum stencil_operation(DWORD operation)
  {
-@@ -3487,6 +5004,12 @@ static void apply_raster_state(BOOL has_depth)
+@@ -3487,6 +5044,12 @@ static void apply_raster_state(BOOL has_depth)
  	what keeps a split-screen window's geometry from bleeding across the divider */
  	/* (glScissor takes the corner and the size, as glViewport does) */
  	memcpy(scissor, viewport, sizeof(scissor));
@@ -8578,7 +8606,7 @@ index 9e260d75..a413a246 100644
  	if (memcmp(gl_state.scissor, scissor, sizeof(scissor)))
  	{
  		memcpy(gl_state.scissor, scissor, sizeof(scissor));
-@@ -3650,13 +5173,10 @@ static void apply_raster_state(BOOL has_depth)
+@@ -3650,13 +5213,10 @@ static void apply_raster_state(BOOL has_depth)
  each draw instead, reporting each distinct error a few times */
  static void gl_check_errors(const char *where)
  {
@@ -8593,7 +8621,7 @@ index 9e260d75..a413a246 100644
  		return;
  	while ((error = glGetError()) != GL_NO_ERROR)
  	{
-@@ -3674,7 +5194,177 @@ counts the conversions */
+@@ -3674,7 +5234,177 @@ counts the conversions */
  
  static DWORD draw_uniform_inputs[DRAW_UNIFORM_INPUT_COUNT];
  static struct draw_uniforms draw_uniforms;
@@ -8772,7 +8800,7 @@ index 9e260d75..a413a246 100644
  
  /* sets a program's uniform unless it already holds value */
  static void uniform_vec4(GLint location, float *shadow, const float *value, int count)
-@@ -3734,21 +5424,70 @@ static unsigned long model_light_register(int light)
+@@ -3734,21 +5464,70 @@ static unsigned long model_light_register(int light)
  {
  	return (unsigned long)(XGPU_VERTEX_CONSTANT_BIAS + (light ? -80 + light : -82));
  }
@@ -8843,7 +8871,7 @@ index 9e260d75..a413a246 100644
  	{
  		const char *skip = debug_settings.skip_vertex_shaders;
  
-@@ -3771,14 +5510,23 @@ static struct program_entry *prepare_draw(BOOL immediate)
+@@ -3771,14 +5550,23 @@ static struct program_entry *prepare_draw(BOOL immediate)
  	/* the textures before the targets: a render target the draw samples
  	has its multisampled pixels resolved by a blit (render_target_resolve),
  	which binds framebuffers of its own, and the back buffer can be both
@@ -8871,7 +8899,7 @@ index 9e260d75..a413a246 100644
  	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
  	{
  		key.alpha_kill[stage] = D3D__TextureState[stage][D3DTSS_ALPHAKILL] == D3DTALPHAKILL_ENABLE;
-@@ -3800,31 +5548,41 @@ static struct program_entry *prepare_draw(BOOL immediate)
+@@ -3800,31 +5588,41 @@ static struct program_entry *prepare_draw(BOOL immediate)
  	key.fog_table_mode = (unsigned char)D3D__RenderState[D3DRS_FOGTABLEMODE];
  #ifdef HALO_GLES
  	key.count_samples = device.visibility_test_active && xgpu_capabilities.atomic_counters;
@@ -8928,7 +8956,7 @@ index 9e260d75..a413a246 100644
  	gl_check_errors("state");
  	if (immediate)
  		stats.immediate_draws++;
-@@ -3834,7 +5592,14 @@ static struct program_entry *prepare_draw(BOOL immediate)
+@@ -3834,7 +5632,14 @@ static struct program_entry *prepare_draw(BOOL immediate)
  	device.draw_serial++;
  #endif
  	draw_flush();
@@ -8944,7 +8972,7 @@ index 9e260d75..a413a246 100644
  	if (key.source_blend && entry->blend_constant >= 0)
  	{
  		float blend_constant[4];
-@@ -3852,6 +5617,10 @@ static struct program_entry *prepare_draw(BOOL immediate)
+@@ -3852,6 +5657,10 @@ static struct program_entry *prepare_draw(BOOL immediate)
  			(GLintptr)(device.counter_active * sizeof(GLuint)), sizeof(GLuint));
  #endif
  
@@ -8955,7 +8983,7 @@ index 9e260d75..a413a246 100644
  	if (entry->constants >= 0 && entry->constants_serial != constants_serial)
  	{
  		unsigned long first = entry->constant_count, last = 0, index;
-@@ -3962,7 +5731,7 @@ static struct program_entry *prepare_draw(BOOL immediate)
+@@ -3962,7 +5771,7 @@ static struct program_entry *prepare_draw(BOOL immediate)
  			inputs[count++] = state[D3DTSS_BUMPENVMAT11];
  			inputs[count++] = state[D3DTSS_BUMPENVLSCALE];
  			inputs[count++] = state[D3DTSS_BUMPENVLOFFSET];
@@ -8964,7 +8992,7 @@ index 9e260d75..a413a246 100644
  		}
  		if (!draw_uniforms_serial || !words_equal(inputs, draw_uniform_inputs, sizeof(inputs)))
  		{
-@@ -3999,30 +5768,21 @@ static struct program_entry *prepare_draw(BOOL immediate)
+@@ -3999,30 +5808,21 @@ static struct program_entry *prepare_draw(BOOL immediate)
  				converted->bump_luminance[stage][0] = dword_to_float(state[D3DTSS_BUMPENVLSCALE]);
  				converted->bump_luminance[stage][1] = dword_to_float(state[D3DTSS_BUMPENVLOFFSET]);
  				converted->bump_luminance[stage][2] = converted->bump_luminance[stage][3] = 0.0f;
@@ -9005,7 +9033,7 @@ index 9e260d75..a413a246 100644
  	return entry;
  }
  
-@@ -4262,6 +6022,10 @@ static BOOL mirror_refresh(unsigned long first, unsigned long last)
+@@ -4262,6 +6062,10 @@ static BOOL mirror_refresh(unsigned long first, unsigned long last)
  		}
  		address = PLATFORM_CONTIGUOUS_BASE + page * MIRROR_PAGE_SIZE;
  		size = (run - page) * MIRROR_PAGE_SIZE;
@@ -9016,7 +9044,7 @@ index 9e260d75..a413a246 100644
  		/* protect first, so a write racing with the upload is noticed */
  		memory_watch_protect(address, size);
  		for (; page < run; page++)
-@@ -4346,7 +6110,11 @@ static BOOL mirror_range(unsigned long address, unsigned long size, GLuint *buff
+@@ -4346,7 +6150,11 @@ static BOOL mirror_range(unsigned long address, unsigned long size, GLuint *buff
  	}
  	if (!present || memory_watch_generation(address, size) > oldest)
  	{
@@ -9029,7 +9057,7 @@ index 9e260d75..a413a246 100644
  			return FALSE;
  		for (newest = 0, page = first; page < last; page++)
  		{
-@@ -4490,23 +6258,54 @@ between two of them would leave the attributes already pointed at the
+@@ -4490,23 +6298,54 @@ between two of them would leave the attributes already pointed at the
  buffer reading its new, empty storage. */
  static void stream_reserve(unsigned long size)
  {
@@ -9094,7 +9122,7 @@ index 9e260d75..a413a246 100644
  }
  
  static unsigned long stream_upload(const void *data, unsigned long size);
-@@ -4523,45 +6322,75 @@ static unsigned long stream_upload_aligned(const void *data, unsigned long size,
+@@ -4523,45 +6362,75 @@ static unsigned long stream_upload_aligned(const void *data, unsigned long size,
  
  static unsigned long stream_upload(const void *data, unsigned long size)
  {
@@ -9124,11 +9152,11 @@ index 9e260d75..a413a246 100644
 +	host_gl_buffer_write_to(device.stream_buffer, GL_ARRAY_BUFFER, (unsigned int)offset, (unsigned int)size, data);
  #else
 -	buffer_upload(GL_ARRAY_BUFFER, offset, length, data);
--#endif
--#ifdef HALO_WEB
--	device.stream_serial = device.draw_serial;
 +	buffer_upload(GL_ARRAY_BUFFER, offset, size, data);
  #endif
+-#ifdef HALO_WEB
+-	device.stream_serial = device.draw_serial;
+-#endif
 -	device.stream_offset += size;
 +	device.stream_offset += rounded;
  	return offset;
@@ -9195,7 +9223,7 @@ index 9e260d75..a413a246 100644
  		return stream_upload(data, size);
  	if (scratch_size < size)
  	{
-@@ -4570,57 +6399,40 @@ static unsigned long stream_upload_swizzled(const struct vertex_shader_object *d
+@@ -4570,57 +6439,40 @@ static unsigned long stream_upload_swizzled(const struct vertex_shader_object *d
  		scratch = malloc(scratch_size);
  	}
  	memcpy(scratch, data, size);
@@ -9229,23 +9257,23 @@ index 9e260d75..a413a246 100644
 -	/* (as stream_reserve) */
 -	if (device.index_offset + size > device.index_capacity ||
 -		(device.index_offset && device.index_serial != device.draw_serial))
-+	stats.uploads++;
-+	stats.uploaded_bytes += rounded;
-+	state_element_array_buffer(device.index_buffer);
-+	if (device.index_offset + rounded > INDEX_BUFFER_SIZE)
- 	{
+-	{
 -		device.index_buffer = web_chunk_get(1, size, &device.index_capacity);
 -		device.index_offset = 0;
 -	}
 -	state_element_array_buffer(device.index_buffer);
+-#else
++	stats.uploads++;
++	stats.uploaded_bytes += rounded;
+ 	state_element_array_buffer(device.index_buffer);
+-	if (device.index_offset + size > INDEX_BUFFER_SIZE)
++	if (device.index_offset + rounded > INDEX_BUFFER_SIZE)
+ 	{
 +#ifdef HALO_ANDROID
 +		/* immutable storage (stream_reserve) */
 +		glFinish();
 +		hitch.frame.ring_waits++;
- #else
--	state_element_array_buffer(device.index_buffer);
--	if (device.index_offset + size > INDEX_BUFFER_SIZE)
--	{
++#else
  		glBufferData(GL_ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE, NULL, GL_STREAM_DRAW);
 -		device.index_offset = 0;
 -	}
@@ -9273,7 +9301,7 @@ index 9e260d75..a413a246 100644
  	return offset;
  }
  
-@@ -4633,7 +6445,7 @@ static void attribute_format(const struct vertex_element *element, GLint *size,
+@@ -4633,7 +6485,7 @@ static void attribute_format(const struct vertex_element *element, GLint *size,
  	case D3DVSDT_FLOAT2: *size = 2; *type = GL_FLOAT; break;
  	case D3DVSDT_FLOAT3: case D3DVSDT_FLOAT2H: *size = 3; *type = GL_FLOAT; break;
  	case D3DVSDT_FLOAT4: *size = 4; *type = GL_FLOAT; break;
@@ -9282,7 +9310,7 @@ index 9e260d75..a413a246 100644
  	/* ES has no BGRA attributes: stream_upload_swizzled swaps the bytes */
  	case D3DVSDT_D3DCOLOR: *size = 4; *type = GL_UNSIGNED_BYTE; *normalized = GL_TRUE; break;
  #else
-@@ -4658,21 +6470,13 @@ static void attribute_format(const struct vertex_element *element, GLint *size,
+@@ -4658,21 +6510,13 @@ static void attribute_format(const struct vertex_element *element, GLint *size,
  /* upload vertices [first, first + count) of every stream the declaration
  uses and point the attributes at them; attribute data then starts at
  vertex 0 of the uploaded range */
@@ -9311,7 +9339,7 @@ index 9e260d75..a413a246 100644
  
  #ifdef HALO_WEB
  /* Each draw's attributes would be pointed again (a call into the browser
-@@ -4868,6 +6672,12 @@ static BOOL vertex_array_cache_use(const struct vertex_shader_object *declaratio
+@@ -4868,6 +6712,12 @@ static BOOL vertex_array_cache_use(const struct vertex_shader_object *declaratio
  
  static void setup_streams(unsigned long first, unsigned long count)
  {
@@ -9324,7 +9352,7 @@ index 9e260d75..a413a246 100644
  	struct vertex_shader_object *declaration = device.vertex_shader;
  	GLuint stream_buffers[16];
  	unsigned long stream_offsets[16];
-@@ -4904,6 +6714,21 @@ static void setup_streams(unsigned long first, unsigned long count)
+@@ -4904,6 +6754,21 @@ static void setup_streams(unsigned long first, unsigned long count)
  		stream_buffers[stream] = 0;
  		total += (bytes + 15) & ~15UL;
  	}
@@ -9346,7 +9374,7 @@ index 9e260d75..a413a246 100644
  #ifdef HALO_WEB
  	{
  		/* every stream from the mirror: a vertex array of their own
-@@ -5006,6 +6831,7 @@ static void setup_streams(unsigned long first, unsigned long count)
+@@ -5006,6 +6871,7 @@ static void setup_streams(unsigned long first, unsigned long count)
  		if (!enabled[index])
  			state_attribute_value(index, declaration->packed_mask & (1UL << index) ? NULL : device.attributes[index]);
  	}
@@ -9354,7 +9382,7 @@ index 9e260d75..a413a246 100644
  }
  
  static GLenum primitive_mode(D3DPRIMITIVETYPE type)
-@@ -5063,13 +6889,384 @@ void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_in
+@@ -5063,13 +6929,402 @@ void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_in
  	D3D__IndexData = index_data ? (WORD *)index_data->Data : NULL;
  }
  
@@ -9393,8 +9421,7 @@ index 9e260d75..a413a246 100644
 +/* count vertices drawn as quads (by the static quad indices: count at most
 +QUAD_INDEX_VERTICES) */
 +static void draw_quads(unsigned long count)
- {
--	if (!vertex_count || !prepare_draw(FALSE))
++{
 +	state_element_array_buffer(quad_index_buffer());
 +	glDrawElements(GL_TRIANGLES, (GLsizei)(count / 4 * 6), GL_UNSIGNED_SHORT, NULL);
 +}
@@ -9405,12 +9432,30 @@ index 9e260d75..a413a246 100644
 +{
 +	unsigned long stride = XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float);
 +	unsigned long offset = stream_upload(vertices, count * stride), index;
++#ifdef HALO_GLES
 +
 +	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 +	{
 +		state_attribute_stream(index, 0, device.stream_buffer, 4, GL_FLOAT, GL_FALSE, FALSE, (GLsizei)stride,
 +			offset, index * 4 * sizeof(float));
 +	}
++#else
++	/* every attribute four floats, one after another: a vertex array of its
++	own (upstream's desktop path) */
++	static struct vertex_array_entry *immediate_array;
++
++	if (!immediate_array)
++	{
++		struct vertex_layout layout;
++
++		memset(&layout, 0, sizeof(layout));
++		for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
++			layout_attribute(&layout, index, 0, 4, GL_FLOAT, GL_FALSE, FALSE, index * 4 * sizeof(float));
++		immediate_array = vertex_array_get(&layout);
++	}
++	state_vertex_array(immediate_array);
++	state_vertex_buffer(0, device.stream_buffer, offset, (GLsizei)stride);
++#endif
 +}
 +
 +#ifdef HALO_ANDROID
@@ -9520,7 +9565,8 @@ index 9e260d75..a413a246 100644
 +
 +/* whether an immediate draw may join a batch */
 +static BOOL immediate_batchable(D3DPRIMITIVETYPE type, unsigned long count)
-+{
+ {
+-	if (!vertex_count || !prepare_draw(FALSE))
 +	return debug_settings.batch_quads && !trace_frame() && !device.visibility_test_active &&
 +		((type == D3DPT_TRIANGLEFAN && count == 4) || (type == D3DPT_QUADLIST && count >= 4 && !(count & 3))) &&
 +		count <= QUAD_INDEX_VERTICES;
@@ -9742,7 +9788,7 @@ index 9e260d75..a413a246 100644
  	{
  		unsigned long count;
  		WORD *indices = quad_indices(NULL, vertex_count, &count);
-@@ -5205,15 +7402,436 @@ static BOOL index_cache_get(const WORD *indices, unsigned long count, unsigned l
+@@ -5205,15 +7460,436 @@ static BOOL index_cache_get(const WORD *indices, unsigned long count, unsigned l
  }
  #endif
  
@@ -10154,7 +10200,8 @@ index 9e260d75..a413a246 100644
 +#ifdef HALO_ANDROID
 +	BOOL instancing;
 +#endif
-+
+ 
+-	if (!vertex_count || !index_data || !prepare_draw(FALSE))
 +	draw_caller_count(DRAW_CALLER(), vertex_count);
 +#ifdef HALO_ANDROID
 +	if (debug_settings.draw_callers >= 3 && draw_signature_count(primitive_type, vertex_count, index_data))
@@ -10169,8 +10216,7 @@ index 9e260d75..a413a246 100644
 +#else
 +	batch_flush();
 +#endif
- 
--	if (!vertex_count || !index_data || !prepare_draw(FALSE))
++
 +	device.drawing_points = primitive_type == D3DPT_POINTLIST;
 +	entry = vertex_count && index_data ? prepare_draw(FALSE) : NULL;
 +#ifdef HALO_ANDROID
@@ -10180,7 +10226,7 @@ index 9e260d75..a413a246 100644
  		return;
  	/* quads are drawn as triangles, from indices made for the draw */
  	mirrored = primitive_type != D3DPT_QUADLIST &&
-@@ -5235,15 +7853,40 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT
+@@ -5235,15 +7911,40 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT
  	index_extent(index_data, vertex_count, generation, mirrored, &minimum, &maximum);
  	trace_draw("indexed", primitive_type, vertex_count, NULL);
  	/* (the streams from the base vertex on: index i is vertex base + i) */
@@ -10224,7 +10270,7 @@ index 9e260d75..a413a246 100644
  	stats.streamed_bytes += vertex_count * sizeof(WORD);
  	count = vertex_count;
  	if (primitive_type == D3DPT_QUADLIST)
-@@ -5267,11 +7910,151 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT
+@@ -5267,11 +7968,151 @@ void WINAPI D3DDevice_DrawIndexedVertices(D3DPRIMITIVETYPE primitive_type, UINT
  	}
  #endif
  	(void)index;
@@ -10378,7 +10424,7 @@ index 9e260d75..a413a246 100644
  /* ---------- immediate mode */
  
  void WINAPI D3DDevice_Begin(D3DPRIMITIVETYPE primitive_type)
-@@ -5279,7 +8062,6 @@ void WINAPI D3DDevice_Begin(D3DPRIMITIVETYPE primitive_type)
+@@ -5279,7 +8120,6 @@ void WINAPI D3DDevice_Begin(D3DPRIMITIVETYPE primitive_type)
  	device.immediate_active = TRUE;
  	device.immediate_type = primitive_type;
  	device.immediate_count = 0;
@@ -10386,7 +10432,7 @@ index 9e260d75..a413a246 100644
  }
  
  static void immediate_emit(void)
-@@ -5303,184 +8085,40 @@ static void immediate_emit(void)
+@@ -5303,184 +8143,40 @@ static void immediate_emit(void)
  
  void WINAPI D3DDevice_End(void)
  {
@@ -10590,7 +10636,7 @@ index 9e260d75..a413a246 100644
  	}
  	gl_check_errors("immediate draw");
  }
-@@ -5500,8 +8138,6 @@ static void set_attribute(INT reg, float a, float b, float c, float d)
+@@ -5500,8 +8196,6 @@ static void set_attribute(INT reg, float a, float b, float c, float d)
  	device.attributes[reg][1] = b;
  	device.attributes[reg][2] = c;
  	device.attributes[reg][3] = d;
@@ -10599,7 +10645,7 @@ index 9e260d75..a413a246 100644
  	/* like the hardware, writing register 0 completes a vertex */
  	if (device.immediate_active && (emit || reg == 0))
  		immediate_emit();
-@@ -5557,7 +8193,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
+@@ -5557,7 +8251,8 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
  	BOOL has_depth = FALSE;
  	DWORD index;
  
@@ -10609,7 +10655,7 @@ index 9e260d75..a413a246 100644
  		return;
  	if (trace_frame())
  		platform_log("clear flags %lx color %08lx z %g count %lu target %08lx depth %08lx", (unsigned long)flags,
-@@ -5650,7 +8287,7 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
+@@ -5650,7 +8345,7 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
  	corners[1] = scaled_pixel(y0, target->target.scale[1]);
  	corners[2] = scaled_pixel(x1, target->target.scale[0]);
  	corners[3] = scaled_pixel(y1, target->target.scale[1]);
@@ -10618,7 +10664,16 @@ index 9e260d75..a413a246 100644
  		target->target.gl_width, target->target.gl_height, corners);
  	glBindVertexArray(device.vertex_array);
  	xgpu_gl_state_invalidate();
-@@ -5771,7 +8408,7 @@ static void write_screenshot(struct render_target_entry *target)
+@@ -5715,7 +8410,7 @@ static void write_key_screenshot(struct render_target_entry *target)
+ 	glGetIntegerv(GL_PACK_ROW_LENGTH, &row_length);
+ 	glGetIntegerv(GL_PACK_SKIP_ROWS, &skip_rows);
+ 	glGetIntegerv(GL_PACK_SKIP_PIXELS, &skip_pixels);
+-	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(target->target.texture, 0));
++	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(target->target.texture, target->target.level, 0));
+ 	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+ 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+ 	glPixelStorei(GL_PACK_ROW_LENGTH, surface->pitch / 4);
+@@ -5771,7 +8466,7 @@ static void write_screenshot(struct render_target_entry *target)
  	if (!directory)
  		return;
  	pixels = malloc(image_size);
@@ -10627,7 +10682,7 @@ index 9e260d75..a413a246 100644
  	glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
  	/* the display ignores destination alpha, which the game uses as scratch;
  	image viewers would show it as transparency */
-@@ -5830,6 +8467,19 @@ static void visibility_copy_batch(void)
+@@ -5830,6 +8525,19 @@ static void visibility_copy_batch(void)
  }
  
  #endif
@@ -10647,7 +10702,7 @@ index 9e260d75..a413a246 100644
  void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destination_rectangle,
  	void *unused, void *unused2)
  {
-@@ -5841,15 +8491,36 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5841,15 +8549,36 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  	(void)unused2;
  	if (screenshot_every < 0)
  		screenshot_every = config_integer("debug.screenshot_every");
@@ -10684,7 +10739,7 @@ index 9e260d75..a413a246 100644
  		render_target_resolve(&back_buffer->target);
  #ifndef HALO_GLES
  		visibility_copy_batch();
-@@ -5872,12 +8543,15 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5872,12 +8601,15 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  		}
  		x = (window_width - width) / 2;
  		y = (window_height - height) / 2;
@@ -10701,7 +10756,7 @@ index 9e260d75..a413a246 100644
  		/* row 0 of the render target is the top of the picture */
  		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
  			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-@@ -5885,42 +8559,20 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5885,42 +8617,20 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  		xgpu_gl_state_invalidate();
  		memory_watch_begin_frame();
  		xgpu_texture_cache_begin_frame();
@@ -10749,7 +10804,7 @@ index 9e260d75..a413a246 100644
  		device.index_offset = 0;
  #ifdef HALO_WEB
  		web_chunks_begin_frame();
-@@ -5934,12 +8586,23 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5934,12 +8644,23 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  	stats.presents++;
  	if (debug_settings.statistics && device.frame % 60 == 0)
  	{
@@ -10775,7 +10830,7 @@ index 9e260d75..a413a246 100644
  	}
  	platform_pump_events();
  
-@@ -5958,6 +8621,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
+@@ -5958,6 +8679,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
  		pending_flips++;
  	}
  	pthread_mutex_unlock(&vertical_blank_lock);
@@ -10945,7 +11000,7 @@ index b553e607..1ef5c47a 100644
  
  static SDL_AudioStream *audio_stream;
 diff --git a/port/linux/src/gl.h b/port/linux/src/gl.h
-index 8876a367..796e5dd0 100644
+index 8876a367..33882dcf 100644
 --- a/port/linux/src/gl.h
 +++ b/port/linux/src/gl.h
 @@ -113,6 +113,8 @@ this list to generate the guest's entry points */
@@ -10986,7 +11041,15 @@ index 8876a367..796e5dd0 100644
  	X(glCreateShader) \
  	X(glShaderSource) \
  	X(glCompileShader) \
-@@ -356,6 +366,8 @@ pointers, sees the declarations without these aliases */
+@@ -245,6 +255,7 @@ context has the extension, never required (gl_functions.c). On ES 3.0 and
+ 	X(glBindAttribLocation) \
+ 	X(glBindFragDataLocation) \
+ 	X(glLinkProgram) \
++	X(glDeleteProgram) \
+ 	X(glGetProgramiv) \
+ 	X(glGetProgramInfoLog) \
+ 	X(glUseProgram) \
+@@ -356,6 +367,8 @@ pointers, sees the declarations without these aliases */
  #define glDrawArrays halo_glDrawArrays
  #define glDrawElements halo_glDrawElements
  #define glDrawElementsBaseVertex halo_glDrawElementsBaseVertex
@@ -10995,7 +11058,7 @@ index 8876a367..796e5dd0 100644
  #define glCreateShader halo_glCreateShader
  #define glShaderSource halo_glShaderSource
  #define glCompileShader halo_glCompileShader
-@@ -366,6 +378,10 @@ pointers, sees the declarations without these aliases */
+@@ -366,6 +379,10 @@ pointers, sees the declarations without these aliases */
  #define glAttachShader halo_glAttachShader
  #define glBindAttribLocation halo_glBindAttribLocation
  #define glLinkProgram halo_glLinkProgram
@@ -11006,7 +11069,7 @@ index 8876a367..796e5dd0 100644
  #define glGetProgramiv halo_glGetProgramiv
  #define glGetProgramInfoLog halo_glGetProgramInfoLog
  #define glUseProgram halo_glUseProgram
-@@ -375,6 +391,9 @@ pointers, sees the declarations without these aliases */
+@@ -375,6 +392,9 @@ pointers, sees the declarations without these aliases */
  #define glUniform1f halo_glUniform1f
  #define glUniform4fv halo_glUniform4fv
  #define glUniform2f halo_glUniform2f
@@ -11016,7 +11079,7 @@ index 8876a367..796e5dd0 100644
  #define glGenQueries halo_glGenQueries
  #define glBeginQuery halo_glBeginQuery
  #define glEndQuery halo_glEndQuery
-@@ -469,6 +488,7 @@ pointers, sees the declarations without these aliases */
+@@ -469,6 +489,7 @@ pointers, sees the declarations without these aliases */
  #define glDrawArrays halo_glDrawArrays
  #define glDrawElements halo_glDrawElements
  #define glDrawElementsBaseVertex halo_glDrawElementsBaseVertex
@@ -11024,6 +11087,14 @@ index 8876a367..796e5dd0 100644
  #define glCreateShader halo_glCreateShader
  #define glShaderSource halo_glShaderSource
  #define glCompileShader halo_glCompileShader
+@@ -480,6 +501,7 @@ pointers, sees the declarations without these aliases */
+ #define glBindAttribLocation halo_glBindAttribLocation
+ #define glBindFragDataLocation halo_glBindFragDataLocation
+ #define glLinkProgram halo_glLinkProgram
++#define glDeleteProgram halo_glDeleteProgram
+ #define glGetProgramiv halo_glGetProgramiv
+ #define glGetProgramInfoLog halo_glGetProgramInfoLog
+ #define glUseProgram halo_glUseProgram
 diff --git a/port/linux/src/menu_files.c b/port/linux/src/menu_files.c
 index fd79da2a..8d2d6ef0 100644
 --- a/port/linux/src/menu_files.c
