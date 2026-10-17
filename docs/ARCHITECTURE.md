@@ -1224,9 +1224,14 @@ does. A flag is flipped on the game's thread, and those the menu turned on
 are put back each tick while the machine is the game's. The flags are
 global, so every player has them, bots included; on a client
 `cheats_network_client_enforce` zeroes them each tick, so a player who
-joined plays by the host's rules.
+joined plays by the host's rules. The page's own row, God mode (just us),
+keeps alive only this machine's players (those with a `local_player_index`:
+not a bot, nor a player who joined), while the machine is the game's:
+`damage.c`'s two god mode tests ask `spawn_menu_deathless`, which answers
+for the game's cheat or for that row. As with the game's, a vehicle
+carrying one of them is kept too, and with it whoever else rides in it.
 
-Five hooks join it to the game:
+Six hooks join it to the game:
 
 - `XInputGetState` (`port/linux/src/xinput_sdl.c`) passes each controller's
   pad through `spawn_menu_pad`, which opens the menu on Back held with D-pad
@@ -1245,6 +1250,8 @@ Five hooks join it to the game:
 - `interface_draw_fullscreen_overlays` draws it after the console, in the
   terminal font.
 - `game_dispose_from_old_map` closes it, so no old map's tag is spawned.
+- `damage.c` asks `spawn_menu_deathless` whether god mode keeps a unit
+  alive.
 
 ## Data flow
 
@@ -1321,7 +1328,7 @@ between ticks, so the frame rate can exceed the tick rate.
 | `port/linux/src/xbox_textures.c` | 16-bit texels, opacity | patched |
 | `port/linux/src/port_config.c` | The new settings | patched |
 | `port/linux/game/spawn_menu.c`, `.h` | The spawn menu | new |
-| `port/linux/src/xinput_sdl.c`, `source/interface/interface.c`, `source/main/main.c`, `source/game/game.c` | The spawn menu's hooks | patched |
+| `port/linux/src/xinput_sdl.c`, `source/interface/interface.c`, `source/main/main.c`, `source/game/game.c`, `source/objects/damage.c` | The spawn menu's hooks | patched |
 | `port/linux/src/xgpu.h`, `gl.h` | Shared declarations; the new GL functions | patched |
 | `tools/android_gl_stubs.py` | `guest_gl_before_call` in the generated stubs | patched |
 | `source/rasterizer/xbox/rasterizer_xbox_models.c` | Models sorted by shader | patched |

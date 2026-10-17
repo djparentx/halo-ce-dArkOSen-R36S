@@ -5218,10 +5218,10 @@ index 149023f0..cf607e98 100644
  		{
 diff --git a/port/linux/game/spawn_menu.c b/port/linux/game/spawn_menu.c
 new file mode 100644
-index 00000000..3921fecd
+index 00000000..00fd8cb3
 --- /dev/null
 +++ b/port/linux/game/spawn_menu.c
-@@ -0,0 +1,746 @@
+@@ -0,0 +1,768 @@
 +/*
 +SPAWN_MENU.C
 +
@@ -5250,7 +5250,9 @@ index 00000000..3921fecd
 +
 +Its last page, CHEATS, turns the game's own cheats on and off with A (god
 +mode, infinite ammo, bottomless clip, one-hit kills, super jump, jetpack,
-+Medusa, bump possession: cheats.h) and makes the menu's player camouflaged.
++Medusa, bump possession: cheats.h), and a god mode of its own for this
++machine's players alone (spawn_menu_deathless: not the bots, nor those who
++joined), and makes the menu's player camouflaged.
 +What it turns on holds for the session, put back each tick (a new level, a
 +checkpoint), on the game's own machine alone, as the menu is; the cheats
 +are the game's, so every player of the game has them.
@@ -5350,6 +5352,10 @@ index 00000000..3921fecd
 +	"VEHICLES", "WEAPONS", "EQUIPMENT", "CHARACTERS", "CHEATS"
 +};
 +
++/* the CHEATS page's god mode for this machine's players alone
++(spawn_menu_deathless) */
++static boolean spawn_deathless_local;
++
 +/* the CHEATS page's rows: the game's cheat (none: camouflage, made at once),
 +and what it does */
 +static struct spawn_cheat
@@ -5359,7 +5365,8 @@ index 00000000..3921fecd
 +	char const *help;
 +} const spawn_cheats[] =
 +{
-+	{ "God mode", &cheat.deathless_player, "Players can't die." },
++	{ "God mode", &cheat.deathless_player, "No player dies: the bots and those who joined too." },
++	{ "God mode (just us)", &spawn_deathless_local, "Only the players on this machine can't die." },
 +	{ "Infinite ammo", &cheat.infinite_ammo, "Players' ammo and grenades never run out." },
 +	{ "Bottomless clip", &cheat.bottomless_clip, "Players never reload." },
 +	{ "One-hit kills", &cheat.omnipotent, "Players kill anything in one hit." },
@@ -5839,6 +5846,21 @@ index 00000000..3921fecd
 +	spawn_cheats_update();
 +}
 +
++int spawn_menu_deathless(
++	long unit_index)
++{
++	long player_index = unit_get(unit_index)->unit.player_index;
++	short connection;
++
++	if (player_index == NONE)
++		return FALSE;
++	if (cheat.deathless_player)
++		return TRUE;
++	connection = game_connection();
++	return spawn_deathless_local && player_get(player_index)->local_player_index != NONE &&
++		(connection == _game_connection_local || connection == _game_connection_network_server);
++}
++
 +int spawn_menu_has(
 +	short port)
 +{
@@ -5970,10 +5992,10 @@ index 00000000..3921fecd
 +}
 diff --git a/port/linux/game/spawn_menu.h b/port/linux/game/spawn_menu.h
 new file mode 100644
-index 00000000..94c92b4b
+index 00000000..fe8efbea
 --- /dev/null
 +++ b/port/linux/game/spawn_menu.h
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,31 @@
 +#ifndef __SPAWN_MENU_H
 +#define __SPAWN_MENU_H
 +
@@ -5990,6 +6012,10 @@ index 00000000..94c92b4b
 +void spawn_menu_update(void);
 +/* each frame's fullscreen overlays (interface_draw_fullscreen_overlays) */
 +void spawn_menu_draw(void);
++/* whether god mode keeps the unit alive (damage.c): the game's cheat, for
++every player's, or the CHEATS page's own, for a player of this machine
++while it is the game's (not a bot's, nor one who joined) */
++int spawn_menu_deathless(long unit_index);
 +/* whether the menu is open on the controller (port 0-3): the mouse, which
 +plays as the first, stays out of the game while it is */
 +int spawn_menu_has(short port);
@@ -13998,6 +14024,55 @@ index 09688926..a192691e 100644
  	/* (what Discord shows of a game hosted for internet play, and the
  	server browser's listing) */
  	p2p_set_game_player_counts(server->game.player_count, server->game.maximum_players);
+diff --git a/source/objects/damage.c b/source/objects/damage.c
+index 8073bc94..439cb090 100644
+--- a/source/objects/damage.c
++++ b/source/objects/damage.c
+@@ -139,6 +139,10 @@ symbols in this file:
+ #include "units/units.h"
+ #include "units/vehicles.h"
+ 
++/* port: god mode, the game's for every player or the spawn menu's for this
++machine's alone (port/linux/game/spawn_menu.c) */
++int spawn_menu_deathless(long unit_index);
++
+ /* network_game_globals.c's */
+ boolean network_game_distributed_client(void);
+ /* port/linux/game/network_damage.c's */
+@@ -585,7 +589,7 @@ void object_deplete_body(
+ 
+ 				unit = (struct unit_datum *)object_get(unit_index);
+ 				if (unit->object.type == _object_type_biped &&
+-					(unit->unit.player_index == NONE || !cheat.deathless_player) &&
++					!spawn_menu_deathless(unit_index) &&
+ 					unit->unit.parent_seat_index != NONE)
+ 				{
+ 					unit_kill(unit_index);
+@@ -1299,11 +1303,11 @@ static void object_damage_body(
+ 	if (object->object.recent_body_damage > 1.f)
+ 		object->object.recent_body_damage = 1.f;
+ 
+-	if (cheat.deathless_player && object->object.body_vitality < 0.f)
++	if (object->object.body_vitality < 0.f)
+ 	{
+ 		if (TEST_FLAG(_object_mask_unit, object->object.type))
+ 		{
+-			boolean player_controlled = unit_get(object_index)->unit.player_index != NONE;
++			boolean player_controlled = spawn_menu_deathless(object_index);
+ 
+ 			if (!player_controlled && object->object.type == _object_type_vehicle)
+ 			{
+@@ -1315,9 +1319,7 @@ static void object_damage_body(
+ 
+ 					if (TEST_FLAG(_object_mask_unit, child_object->object.type))
+ 					{
+-						struct unit_datum *child_unit = (struct unit_datum *)child_object;
+-
+-						if (child_unit->unit.player_index != NONE)
++						if (spawn_menu_deathless(child_object_index))
+ 						{
+ 							player_controlled = TRUE;
+ 							break;
 diff --git a/source/rasterizer/rasterizer.c b/source/rasterizer/rasterizer.c
 index de9e17c3..d1709eb9 100644
 --- a/source/rasterizer/rasterizer.c

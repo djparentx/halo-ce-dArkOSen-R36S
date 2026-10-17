@@ -290,7 +290,9 @@ take it over). Its last row, active camouflage, makes you
 invisible for a while. The cheats are the game's, so every player in the
 game has them, the players who joined and the bots too: with god mode on in
 a Bot Match no one dies, and with one-hit kills the bots kill in one hit as
-well. A cheat stays on, from level to level, until you turn it off or quit
+well. God mode (just us), the row under God mode, keeps alive only the
+players on this handheld or PC: not the bots, nor the players who joined.
+A cheat stays on, from level to level, until you turn it off or quit
 Halo. Only the host has the page, as the rest of the menu; a player who
 joined someone else's game plays by that host's rules.
 
