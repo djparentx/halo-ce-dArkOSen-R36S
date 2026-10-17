@@ -265,12 +265,12 @@ is sent over the network.
 
 | Handheld (RG35XX H) | In the menu |
 | --- | --- |
-| L1, R1 | the previous or next page: vehicles, weapons, equipment, characters |
+| L1, R1 | the previous or next page: vehicles, weapons, equipment, characters, cheats |
 | D-pad Up and Down, or the left stick's up and down | pick |
 | Left stick left and right | step to the side, the menu open |
 | Right stick | turn, the menu open |
 | D-pad Left and Right | a character's side: their own, an ally of yours, or an enemy |
-| B (bottom) | spawn |
+| B (bottom) | spawn; on the cheats page, the cheat on or off |
 | A (right) | close |
 | START | close and pause |
 
@@ -282,6 +282,17 @@ jump until it closes.
 Each level lists only what it has loaded, so the lists change from level to
 level. An ally fights on your side, an enemy against you; "their own" keeps
 the character's own side (an Elite stays Covenant).
+
+The last page, CHEATS, turns the game's own cheats on and off: god mode,
+infinite ammo, bottomless clip, one-hit kills, super jump, jetpack, Medusa
+(enemies that see you die) and bump possession (walk into a character to
+take it over). Its last row, active camouflage, makes you
+invisible for a while. The cheats are the game's, so every player in the
+game has them, the players who joined and the bots too: with god mode on in
+a Bot Match no one dies, and with one-hit kills the bots kill in one hit as
+well. A cheat stays on, from level to level, until you turn it off or quit
+Halo. Only the host has the page, as the rest of the menu; a player who
+joined someone else's game plays by that host's rules.
 
 ## Bot Match
 

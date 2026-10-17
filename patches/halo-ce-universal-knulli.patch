@@ -5218,10 +5218,10 @@ index 149023f0..cf607e98 100644
  		{
 diff --git a/port/linux/game/spawn_menu.c b/port/linux/game/spawn_menu.c
 new file mode 100644
-index 00000000..426617b4
+index 00000000..3921fecd
 --- /dev/null
 +++ b/port/linux/game/spawn_menu.c
-@@ -0,0 +1,621 @@
+@@ -0,0 +1,746 @@
 +/*
 +SPAWN_MENU.C
 +
@@ -5247,6 +5247,13 @@ index 00000000..426617b4
 +
 +After AlphaRing's Halo CE spawn menu (its mcc/spawn/halo1.cpp): the same
 +pages and placement.
++
++Its last page, CHEATS, turns the game's own cheats on and off with A (god
++mode, infinite ammo, bottomless clip, one-hit kills, super jump, jetpack,
++Medusa, bump possession: cheats.h) and makes the menu's player camouflaged.
++What it turns on holds for the session, put back each tick (a new level, a
++checkpoint), on the game's own machine alone, as the menu is; the cheats
++are the game's, so every player of the game has them.
 +*/
 +
 +#include "cseries.h"
@@ -5255,6 +5262,7 @@ index 00000000..426617b4
 +#include "ai/ai_script.h"
 +#include "cache/cache_files.h"
 +#include "cutscene/cinematics.h"
++#include "game/cheats.h"
 +#include "game/game.h"
 +#include "game/players.h"
 +#include "interface/interface.h"
@@ -5289,6 +5297,7 @@ index 00000000..426617b4
 +	_spawn_page_weapons,
 +	_spawn_page_equipment,
 +	_spawn_page_characters,
++	_spawn_page_cheats,
 +	NUMBER_OF_SPAWN_PAGES
 +};
 +
@@ -5333,13 +5342,34 @@ index 00000000..426617b4
 +#define SPAWN_WHITE SPAWN_ANALOG_BIT(XINPUT_GAMEPAD_WHITE)  /* LB on later pads */
 +
 +/* how far ahead of the player each page's things go, and how high */
-+static real const spawn_distances[NUMBER_OF_SPAWN_PAGES] = { 5.0f, 1.5f, 1.5f, 3.0f };
++static real const spawn_distances[NUMBER_OF_SPAWN_PAGES] = { 5.0f, 1.5f, 1.5f, 3.0f, 0.0f };
 +#define SPAWN_HEIGHT 0.8f
 +
 +static char const *const spawn_page_names[NUMBER_OF_SPAWN_PAGES] =
 +{
-+	"VEHICLES", "WEAPONS", "EQUIPMENT", "CHARACTERS"
++	"VEHICLES", "WEAPONS", "EQUIPMENT", "CHARACTERS", "CHEATS"
 +};
++
++/* the CHEATS page's rows: the game's cheat (none: camouflage, made at once),
++and what it does */
++static struct spawn_cheat
++{
++	char const *name;
++	boolean *flag;
++	char const *help;
++} const spawn_cheats[] =
++{
++	{ "God mode", &cheat.deathless_player, "Players can't die." },
++	{ "Infinite ammo", &cheat.infinite_ammo, "Players' ammo and grenades never run out." },
++	{ "Bottomless clip", &cheat.bottomless_clip, "Players never reload." },
++	{ "One-hit kills", &cheat.omnipotent, "Players kill anything in one hit." },
++	{ "Super jump", &cheat.super_jump, "Players jump much higher." },
++	{ "Jetpack", &cheat.jetpack, "Fire and grenade together fly; no fall damage." },
++	{ "Medusa", &cheat.medusa, "Enemies that see a player die." },
++	{ "Bump possession", &cheat.bump_possession, "Walk into a character to take it over." },
++	{ "Active camouflage", NULL, "Makes you invisible for a while." },
++};
++#define NUMBER_OF_SPAWN_CHEATS ((short)(sizeof(spawn_cheats) / sizeof(spawn_cheats[0])))
 +static char const *const spawn_side_names[NUMBER_OF_SPAWN_SIDES] = { "THEIR OWN", "ALLY", "ENEMY" };
 +
 +/* ---------- globals */
@@ -5370,6 +5400,11 @@ index 00000000..426617b4
 +	char status[64];
 +	boolean status_failed;
 +	long status_frames;
++	/* a CHEATS row chosen (its index + 1, made on the game's thread), by the
++	local player's; the cheats the menu turned on (a bit each) */
++	short cheat_request;
++	short cheat_request_player;
++	unsigned long cheats_on;
 +} spawn_menu;
 +
 +/* each controller's buttons at its last poll, those kept from the game
@@ -5470,11 +5505,12 @@ index 00000000..426617b4
 +{
 +	static long const groups[NUMBER_OF_SPAWN_PAGES] =
 +	{
-+		VEHICLE_DEFINITION_TAG, WEAPON_DEFINITION_TAG, EQUIPMENT_DEFINITION_TAG, ACTOR_VARIANT_DEFINITION_TAG
++		VEHICLE_DEFINITION_TAG, WEAPON_DEFINITION_TAG, EQUIPMENT_DEFINITION_TAG, ACTOR_VARIANT_DEFINITION_TAG, NONE
 +	};
 +	short page;
 +
-+	for (page = 0; page < NUMBER_OF_SPAWN_PAGES; page++)
++	spawn_menu.counts[_spawn_page_cheats] = NUMBER_OF_SPAWN_CHEATS;
++	for (page = 0; page < _spawn_page_cheats; page++)
 +	{
 +		struct spawn_item *items = spawn_menu.items[page];
 +		struct tag_iterator iterator;
@@ -5648,6 +5684,61 @@ index 00000000..426617b4
 +	}
 +}
 +
++/* while this is the game's own machine (else a row chosen is dropped): a
++CHEATS row chosen, its cheat on or off (camouflage made); then those the
++menu turned on put back */
++static void spawn_cheats_update(
++	void)
++{
++	short connection = game_connection();
++	short index;
++
++	if (connection != _game_connection_local && connection != _game_connection_network_server)
++	{
++		spawn_menu.cheat_request = 0;
++		return;
++	}
++	if (spawn_menu.cheat_request)
++	{
++		struct spawn_cheat const *row = &spawn_cheats[spawn_menu.cheat_request - 1];
++		unsigned long bit = 1UL << (spawn_menu.cheat_request - 1);
++
++		if (row->flag)
++		{
++			*row->flag = !*row->flag;
++			spawn_menu.cheats_on = *row->flag ? spawn_menu.cheats_on | bit : spawn_menu.cheats_on & ~bit;
++			snprintf(spawn_menu.status, sizeof(spawn_menu.status), "%s %s", row->name, *row->flag ? "on" : "off");
++			spawn_menu.status_failed = FALSE;
++		}
++		else
++		{
++			long unit_index = spawn_menu_player_unit(spawn_menu.cheat_request_player);
++
++			if (unit_index != NONE)
++			{
++				struct unit_datum *unit = unit_get(unit_index);
++
++				/* (as cheat_active_camouflage_local_player) */
++				unit->unit.active_camouflage = 1.0f;
++				if (TEST_FLAG(unit->unit.flags, _unit_active_camouflaged_bit))
++					unit->unit.flags |= FLAG(_unit_super_camouflaged_bit);
++				unit->unit.flags |= FLAG(_unit_active_camouflaged_bit);
++			}
++			snprintf(spawn_menu.status, sizeof(spawn_menu.status), "%s",
++				unit_index != NONE ? "Camouflaged" : "Couldn't camouflage");
++			spawn_menu.status_failed = unit_index == NONE;
++		}
++		spawn_menu.status_frames = SPAWN_STATUS_FRAMES;
++		platform_log("spawn menu: %s", spawn_menu.status);
++		spawn_menu.cheat_request = 0;
++	}
++	for (index = 0; index < NUMBER_OF_SPAWN_CHEATS; index++)
++	{
++		if ((spawn_menu.cheats_on & (1UL << index)) && spawn_cheats[index].flag)
++			*spawn_cheats[index].flag = TRUE;
++	}
++}
++
 +/* ---------- public code */
 +
 +void spawn_menu_pad(
@@ -5712,7 +5803,15 @@ index 00000000..426617b4
 +			spawn_menu.side = (short)((spawn_menu.side +
 +				((pressed & XINPUT_GAMEPAD_DPAD_LEFT) ? NUMBER_OF_SPAWN_SIDES - 1 : 1)) % NUMBER_OF_SPAWN_SIDES);
 +		}
-+		if ((pressed & SPAWN_A) && count && !spawn_menu.request)
++		if (page == _spawn_page_cheats)
++		{
++			if ((pressed & SPAWN_A) && !spawn_menu.cheat_request)
++			{
++				spawn_menu.cheat_request = (short)(spawn_menu.selection[page] + 1);
++				spawn_menu.cheat_request_player = port;
++			}
++		}
++		else if ((pressed & SPAWN_A) && count && !spawn_menu.request)
 +		{
 +			spawn_menu.request = TRUE;
 +			spawn_menu.request_page = page;
@@ -5737,6 +5836,7 @@ index 00000000..426617b4
 +{
 +	if (spawn_menu.request)
 +		spawn_request_make();
++	spawn_cheats_update();
 +}
 +
 +int spawn_menu_has(
@@ -5762,6 +5862,7 @@ index 00000000..426617b4
 +{
 +	if (spawn_owner != NONE)
 +		spawn_menu_close();
++	spawn_menu.cheat_request = 0;
 +}
 +
 +/* a line of text in the rows' left column (rasterizer_draw_string gives it
@@ -5808,6 +5909,30 @@ index 00000000..426617b4
 +	snprintf(line, sizeof(line), "SPAWN   < %s >   LB / RB", spawn_page_names[page]);
 +	spawn_menu_line(&area, font_index, line_height, 0, global_real_argb_yellow, line);
 +	row = 2;
++	if (page == _spawn_page_cheats)
++	{
++		for (index = 0; index < count; index++)
++		{
++			boolean selected = index == spawn_menu.selection[page];
++
++			snprintf(line, sizeof(line), "%s %-20s %s", selected ? ">" : " ", spawn_cheats[index].name,
++				!spawn_cheats[index].flag ? "" : *spawn_cheats[index].flag ? "ON" : "OFF");
++			spawn_menu_line(&area, font_index, line_height, (short)(row + index),
++				selected ? global_real_argb_yellow : global_real_argb_white, line);
++		}
++		row = (short)(row + SPAWN_VISIBLE_ROWS + 1);
++		if (spawn_menu.selection[page] >= 0 && spawn_menu.selection[page] < count)
++			spawn_menu_line(&area, font_index, line_height, row, global_real_argb_grey,
++				spawn_cheats[spawn_menu.selection[page]].help);
++		row = (short)(row + 2);
++		spawn_menu_line(&area, font_index, line_height, row++, global_real_argb_grey, "A TOGGLE    B CLOSE");
++		if (spawn_menu.status_frames > 0)
++		{
++			spawn_menu_line(&area, font_index, line_height, row, spawn_menu.status_failed ? global_real_argb_red :
++				global_real_argb_green, spawn_menu.status);
++		}
++		return;
++	}
 +	if (!count)
 +	{
 +		spawn_menu_line(&area, font_index, line_height, row, global_real_argb_grey, "(none in this map)");

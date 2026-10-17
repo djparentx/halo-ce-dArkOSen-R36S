@@ -57,7 +57,8 @@ them on the handheld, with no network
 
 Hold SELECT and press D-pad Down in a game: the level's vehicles, weapons,
 equipment and characters, placed in front of you, a character on your side
-or against you ([Install: the spawn menu](docs/INSTALL.md#the-spawn-menu)).
+or against you, and a page of the game's cheats
+([Install: the spawn menu](docs/INSTALL.md#the-spawn-menu)).
 
 | The Silent Cartographer (b30): the vehicles page | A Pelican it spawned on the beach |
 | --- | --- |
@@ -107,7 +108,8 @@ offered again ([Install: Updating](docs/INSTALL.md#updating)).
   game starts, and START installs it
   ([Install: Updating](docs/INSTALL.md#updating)).
 - A spawn menu, after [AlphaRing](https://github.com/kirklandsig/AlphaRing)'s: the map's vehicles, weapons,
-  equipment and AI characters, placed in front of you. In single player and
+  equipment and AI characters, placed in front of you, and the game's cheats
+  (god mode, infinite ammo, one-hit kills and more). In single player and
   for the host of a co-op or multiplayer game, never for a player who
   joined: hold SELECT and press D-pad Down
   ([Install: the spawn menu](docs/INSTALL.md#the-spawn-menu)).

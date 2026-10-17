@@ -1215,6 +1215,17 @@ actor (`actor_customize_unit`, `ai_scripting_attach_free`); a unit left
 without an actor is deleted. In a network game the host's objects and actors
 reach the clients as its others do, and nothing new is sent.
 
+Its last page, CHEATS, flips the game's own cheat flags (`struct
+cheat_globals cheat`, `source/game/cheats.h`): god mode
+(`deathless_player`), infinite ammo, bottomless clip, one-hit kills
+(`omnipotent`), super jump, jetpack, Medusa and bump possession. A last row
+camouflages the menu's player, as `cheat_active_camouflage_local_player`
+does. A flag is flipped on the game's thread, and those the menu turned on
+are put back each tick while the machine is the game's. The flags are
+global, so every player has them, bots included; on a client
+`cheats_network_client_enforce` zeroes them each tick, so a player who
+joined plays by the host's rules.
+
 Five hooks join it to the game:
 
 - `XInputGetState` (`port/linux/src/xinput_sdl.c`) passes each controller's
@@ -1229,7 +1240,7 @@ Five hooks join it to the game:
   no script sees an action. (`director_inhibit_input`, which the cheats' Back
   combos use, clears the player's input only after the scripts' action
   tests have seen it.)
-- `main.c` makes a spawn asked for on the game's thread, beside
+- `main.c` makes a spawn or a cheat asked for on the game's thread, beside
   `cheats_update`.
 - `interface_draw_fullscreen_overlays` draws it after the console, in the
   terminal font.
