@@ -157,19 +157,20 @@ optimisations and the measurements behind them are in
 ## Supported devices
 
 The port is made for the Allwinner H700 (4x Cortex-A53 at 1.5 GHz, Mali-G31 MP2,
-1 GB RAM), with Knulli or another firmware that has PortMaster.
+1 GB RAM), with Knulli or another firmware that has PortMaster. Halo moves and
+aims with two analog sticks, so a handheld needs both.
 
 | Device | Screen | Status |
 | --- | --- | --- |
 | Anbernic RG35XX H | 640x480 | Tested |
-| Anbernic RG35XX Plus | 640x480 | Untested, expected to work |
-| Anbernic RG35XX SP | 640x480 | Untested, expected to work |
-| Anbernic RG35XX 2024 | 640x480 | Untested, expected to work |
+| Anbernic RG35XX Plus | 640x480 | No analog sticks: in a game the D-pad can't move or aim, so not playable yet ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
+| Anbernic RG35XX SP | 640x480 | No analog sticks: not playable yet ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
+| Anbernic RG35XX 2024 | 640x480 | No analog sticks: not playable yet ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
 | Anbernic RG40XX H | 640x480 | Untested, expected to work |
-| Anbernic RG40XX V | 640x480 | Untested, expected to work |
+| Anbernic RG40XX V | 640x480 | Untested. One analog stick: it moves, but aiming needs the second |
 | Anbernic RG CubeXX | 720x720 | Untested |
 | Anbernic RG34XX SP | 720x480 | Works, reported by a user ([#1](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/1)) |
-| Anbernic RG34XX | 720x480 | Untested, expected to work |
+| Anbernic RG34XX | 720x480 | No analog sticks: not playable yet ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
 | Anbernic RG353M (RK3566, Mali-G52) | 640x480 | Works on ROCKNIX, reported by a user ([#5](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/5)) |
 | R36S (RK3326, Mali-G31) | 640x480 | Works on dArkOSen from v2026.10.07, reported by a user ([#4](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/4)) |
 
@@ -482,9 +483,11 @@ native port of the decompiled code avoids the emulation entirely.
 
 ### Which other handhelds does it work on?
 
-It should work on the other Allwinner H700 handhelds that run Knulli: the
+It should run on the other Allwinner H700 handhelds that run Knulli: the
 Anbernic RG35XX Plus, SP and 2024, RG40XX H and V, RG CubeXX and RG34XX.
-The RG35XX H is the one it is developed on, and a user reported the RG34XX
+Halo needs two analog sticks to move and aim, though, so the Plus, SP, 2024
+and RG34XX, which have none, and the RG40XX V, which has one, can't play it
+yet ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)). The RG35XX H is the one it is developed on, and a user reported the RG34XX
 SP working, its 3:2 screen filled with `screen_width = 0`
 ([#1](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/1)). TrimUI handhelds and other SoCs are not
 supported.
