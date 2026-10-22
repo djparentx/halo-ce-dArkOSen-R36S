@@ -1309,6 +1309,7 @@ between ticks, so the frame rate can exceed the tick rate.
 | --- | --- | --- |
 | `port/knulli/host/host_main.c` | Entry point, paths, guest environment, logging | new |
 | `port/knulli/host/host_sdl2.c` | SDL3 calls answered by SDL2; exit combination; frame statistics (`HALO_FPS_LOG`) | new |
+| `port/linux/src/dpad_controls.c` | The D-pad in place of a missing stick (`input.dpad_controls`), fed by `xinput_sdl.c` | new |
 | `port/knulli/host/host_sdl3_events.c`, `host_knulli.h` | SDL3 event layout and numbering | new |
 | `port/knulli/host/host_glthread.c`, `host_glthread.h` | The GL thread, host operations, frame pacing, buffer writes made by the game's thread, GPU pass timer, the GL thread's frame split | new |
 | `port/knulli/glthread_gen.py` | Generates the recording and replay functions | new |

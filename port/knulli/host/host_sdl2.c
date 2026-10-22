@@ -589,6 +589,13 @@ int host_sdl_gamepad_axis(uint32_t gamepad, int axis)
 	return object ? SDL_GameControllerGetAxis(object, (SDL_GameControllerAxis)axis) : 0;
 }
 
+int host_sdl_gamepad_has_axis(uint32_t gamepad, int axis)
+{
+	SDL_GameController *object = handle_get(gamepad, _handle_gamepad);
+
+	return object && SDL_GameControllerHasAxis(object, (SDL_GameControllerAxis)axis);
+}
+
 int host_sdl_gamepad_button(uint32_t gamepad, int button)
 {
 	SDL_GameController *object = handle_get(gamepad, _handle_gamepad);

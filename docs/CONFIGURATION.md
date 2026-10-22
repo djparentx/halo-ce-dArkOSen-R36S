@@ -18,6 +18,7 @@ variables at the end are for measuring and developing the port
 - [Renderer switches](#renderer-switches)
 - [Sound and language](#sound-and-language)
 - [Network and updates](#network-and-updates)
+- [Controls](#controls)
 - [Bots](#bots)
 - [Diagnostics](#diagnostics)
 - [Environment variables outside config.toml](#environment-variables-outside-configtoml)
@@ -123,6 +124,7 @@ launcher writes another value, the table says so.
 | [`game.language`](#sound-and-language) | string | `""` | | `HALO_LANGUAGE` (value) |
 | [`network.online`](#network-and-updates) | boolean | `true` | `true` | `HALO_NET_ONLINE` (value) |
 | [`update.auto`](#network-and-updates) | boolean | `true` | `true` | (the launcher reads the file) |
+| [`input.dpad_controls`](#controls) | string | `"auto"` | | `HALO_DPAD_CONTROLS` (value) |
 | [`bots.count`](#bots) | integer | `7` | | `HALO_BOTS` (value) |
 | [`bots.skill`](#bots) | string | `"normal"` | | `HALO_BOT_SKILL` (value) |
 | [`bots.teams`](#bots) | string | `"even"` | | `HALO_BOT_TEAMS` (value) |
@@ -247,8 +249,9 @@ texture memory on a 1 GB device. Keep it on.
 
 The number of columns of the 480-line picture: 640 for the Xbox's 4:3, or
 0 for the display's shape. For 0, the host computes the width from the
-framebuffer's first mode (`/sys/class/graphics/fb0/modes`) as 480 times the
-longer side over the shorter one, and passes it as `HALO_DISPLAY_WIDTH`; on
+mode the framebuffer shows (`FBIOGET_VSCREENINFO` on `/dev/fb0`; its first
+listed mode, `/sys/class/graphics/fb0/modes`, if that fails) as 480 times
+the longer side over the shorter one (the log says which size it read), and passes it as `HALO_DISPLAY_WIDTH`; on
 a 640x480 screen that is 640. With a wider picture the 3D view widens (the
 camera keeps its vertical field of view), and the menus stay 640 columns
 wide in the centre. The picture is centred on the screen.
@@ -601,6 +604,12 @@ describes playing.
 | `network.map_share` | boolean | `true` | | `HALO_NET_MAP_SHARE` | Hosting: send the game's Custom Edition map to players who lack it. |
 | `network.map_seed` | boolean | `true` | | `HALO_NET_MAP_SEED` | Playing in another's game: send its map on to other players who are downloading it. |
 
+## Controls
+
+| Setting | Type | Default | Variable | Effect |
+| --- | --- | --- | --- | --- |
+| `input.dpad_controls` | string | `"auto"` | `HALO_DPAD_CONTROLS` | The D-pad in a game, for a controller without a right stick ([Install: controls](INSTALL.md#controls)). `"auto"` goes by the controller's sticks, as SDL reports them: with a left stick alone the D-pad aims; without sticks Up and Down walk and Left and Right turn, and with L1 held Up and Down look and Left and Right strafe, A crouches and B zooms (L1 pressed and let go alone is the flashlight). `"on"`: the controls without sticks on any controller. `"off"`: the game's own D-pad (walking and strafing). Never in the menus, the spawn menu or with SELECT held. `port/linux/src/dpad_controls.c`. |
+
 ## Bots
 
 The bots of a Bot Match (MULTIPLAYER > BOT MATCH, whose screen writes
@@ -670,7 +679,7 @@ These are read directly by the host (`port/knulli/host/`,
 | `HALO_DATA_ROOT` | `host_main.c` | the executable's folder | The folder with `maps/` and `config.toml`. |
 | `HALO_SAVE_ROOT` | `host_main.c` | `save/` in the data folder | The saved games and the shader cache. |
 | `HALO_GUEST_IMAGE` | `host_main.c` | `halo_guest.elf` beside the executable | The guest image to load. |
-| `HALO_DISPLAY_WIDTH` | `host_main.c` | from the framebuffer's mode | The width `display.screen_width = 0` uses. |
+| `HALO_DISPLAY_WIDTH` | `host_main.c` | from the mode the framebuffer shows | The width `display.screen_width = 0` uses. |
 | `SDL_GAMECONTROLLERCONFIG` | SDL2 | set by `Halo.sh` | The controller mapping from `sdl_mapping.py`. |
 | `HALO_FB_BUFFERS=<n>` | `tools/device/run.sh` | `2` | The number of framebuffers for a benchmark run (`fbset -vyres`). |
 

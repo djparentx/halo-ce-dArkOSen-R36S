@@ -28,11 +28,14 @@ Paths, each overridable from the environment:
 
 #include <android/log.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
+#include <linux/fb.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -196,28 +199,52 @@ static int directory_has_maps(const char *root)
 	return stat(path, &information) == 0;
 }
 
-/* the columns of the 480-line picture for the framebuffer's shape: the
-first mode of fb0, for example "U:640x480p-59" */
+/* the columns of the 480-line picture for the screen's shape: that of the
+mode fb0 shows (its visible resolution), else of the first mode it lists,
+for example "U:640x480p-59", which need not be the one shown */
 static int display_width(void)
 {
-	FILE *modes = fopen("/sys/class/graphics/fb0/modes", "r");
-	int width = 0, height = 0, result = 640;
+	struct fb_var_screeninfo screen;
+	int device = open("/dev/fb0", O_RDONLY | O_CLOEXEC);
+	int width = 0, height = 0;
+	char const *source = "fb0's visible mode";
 
-	if (modes)
+	if (device >= 0)
 	{
+		if (ioctl(device, FBIOGET_VSCREENINFO, &screen) == 0)
+		{
+			width = (int)screen.xres;
+			height = (int)screen.yres;
+		}
+		close(device);
+	}
+	if (width <= 0 || height <= 0)
+	{
+		FILE *modes = fopen("/sys/class/graphics/fb0/modes", "r");
 		char line[128];
 
-		if (fgets(line, sizeof(line), modes) && sscanf(strchr(line, ':') ? strchr(line, ':') + 1 : line,
-			"%dx%d", &width, &height) == 2 && width > 0 && height > 0)
+		width = height = 0;
+		source = "fb0's first mode";
+		if (modes)
 		{
-			int longer = width > height ? width : height;
-			int shorter = width > height ? height : width;
-
-			result = (480 * longer / shorter) & ~1;
+			/* (a size half read leaves a 0, refused below) */
+			if (fgets(line, sizeof(line), modes))
+				sscanf(strchr(line, ':') ? strchr(line, ':') + 1 : line, "%dx%d", &width, &height);
+			fclose(modes);
 		}
-		fclose(modes);
 	}
-	return result;
+	if (width <= 0 || height <= 0)
+	{
+		host_logf(HOST_LOG_INFO, "screen: no size from fb0, 640 columns");
+		return 640;
+	}
+	host_logf(HOST_LOG_INFO, "screen %dx%d (%s)", width, height, source);
+	{
+		int longer = width > height ? width : height;
+		int shorter = width > height ? height : width;
+
+		return (480 * longer / shorter) & ~1;
+	}
 }
 
 /* ---------- the guest's environment */

@@ -243,6 +243,22 @@ the bottom); what matters is the position.
 | START | start | pause menu |
 | SELECT | back | with D-pad Down, the [spawn menu](#the-spawn-menu) |
 
+On a handheld with one analog stick or none (the RG40XX V; the RG35XX
+Plus, SP and 2024, the RG34XX), the D-pad takes the missing stick's place
+in a game, from v2026.10.21 (`input.dpad_controls`; not yet tried on those
+handhelds, [#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)):
+
+| Handheld | D-pad | With L1 held |
+| --- | --- | --- |
+| One stick (it moves) | aims | aims; A crouches, B zooms |
+| No sticks | Up and Down walk, Left and Right turn | Up and Down look, Left and Right strafe; A crouches, B zooms |
+
+L1 pressed and let go by itself is still the flashlight. In the menus and
+the spawn menu, and with SELECT held, the D-pad is the D-pad. The view
+turns as fast as the game's look sensitivity setting says.
+`input.dpad_controls = "off"` keeps the game's own D-pad (walking and
+strafing); `"on"` uses the controls without sticks on any controller.
+
 **To quit, hold the hotkey (MENU), or SELECT, and press START.** The game
 exits, and the launcher restores the clocks and returns to EmulationStation.
 
@@ -395,9 +411,9 @@ Updating from a version before co-op turns it on once; after that your
 choice is kept.
 
 Every machine in a game has to run the same network version, and the
-server browser lists only games of its own. From v2026.10.15 the handheld
-plays version 29, upstream's from 2026-10-14 (build 206), with the PC and
-Android builds of that day on, and with people playing OpenCE's web build in
+server browser lists only games of its own. From v2026.10.21 the handheld
+plays version 32, upstream's from 2026-10-20, with the PC and Android
+builds of that day on, and with people playing OpenCE's web build in
 a browser: a browser connects over WebRTC, which the handheld answers (DTLS,
 with Mbed TLS). When upstream raises the version again, the handheld needs a
 new release to see their games. A game on a Custom Edition map can be
