@@ -1218,9 +1218,17 @@ reach the clients as its others do, and nothing new is sent.
 Its last page, CHEATS, flips the game's own cheat flags (`struct
 cheat_globals cheat`, `source/game/cheats.h`): god mode
 (`deathless_player`), infinite ammo, bottomless clip, one-hit kills
-(`omnipotent`), super jump, jetpack, Medusa and bump possession. A last row
+(`omnipotent`), super jump, jetpack, Medusa and bump possession. A row
 camouflages the menu's player, as `cheat_active_camouflage_local_player`
-does. A flag is flipped on the game's thread, and those the menu turned on
+does, and the last, Teleport everyone to me, places every other player with
+a living unit beside the menu's, facing it, through the co-op scripts'
+placement (`coop_scripts_place`, upstream's `coop_scripts_arrive_at` without
+its co-op check: the spot, beside those already there, or rings round it in
+its sight). The host moves only its own copies: a client's machine puts its
+own player where the host has it once that is far from its own, as for a
+teleporter, so nothing new is sent and any client of the same network
+version follows (`debug.network_test_teleport` does it once in a
+network test). A flag is flipped on the game's thread, and those the menu turned on
 are put back each tick while the machine is the game's. The flags are
 global, so every player has them, bots included; on a client
 `cheats_network_client_enforce` zeroes them each tick, so a player who

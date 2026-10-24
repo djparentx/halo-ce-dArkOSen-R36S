@@ -302,8 +302,12 @@ the character's own side (an Elite stays Covenant).
 The last page, CHEATS, turns the game's own cheats on and off: god mode,
 infinite ammo, bottomless clip, one-hit kills, super jump, jetpack, Medusa
 (enemies that see you die) and bump possession (walk into a character to
-take it over). Its last row, active camouflage, makes you
-invisible for a while. The cheats are the game's, so every player in the
+take it over). Active camouflage makes you invisible for a while.
+Teleport everyone to me, the last row, brings every other player with a
+character beside you, facing you, the bots too: in a big online game,
+whoever is stuck comes to you. The players who joined follow on their own
+machines, as they follow any teleport of the host's, so it works with
+everyone in your game, whatever build they play. The cheats are the game's, so every player in the
 game has them, the players who joined and the bots too: with god mode on in
 a Bot Match no one dies, and with one-hit kills the bots kill in one hit as
 well. God mode (just us), the row under God mode, keeps alive only the
@@ -411,12 +415,16 @@ Updating from a version before co-op turns it on once; after that your
 choice is kept.
 
 Every machine in a game has to run the same network version, and the
-server browser lists only games of its own. From v2026.10.21 the handheld
-plays version 32, upstream's from 2026-10-20, with the PC and Android
+server browser lists only games of its own. From v2026.10.23 the handheld
+plays version 38, upstream's from 2026-10-24, with the PC and Android
 builds of that day on, and with people playing OpenCE's web build in
 a browser: a browser connects over WebRTC, which the handheld answers (DTLS,
 with Mbed TLS). When upstream raises the version again, the handheld needs a
-new release to see their games. A game on a Custom Edition map can be
+new release to see their games. Version 38 brings OpenCE's gametypes
+(SWAT, Infection, Gun Game and Hardcore: Select Gametype's OPENCE bank,
+and OPENCE OPTIONS in Edit Gametypes), co-op's ALLY FRIENDLY FIRE, and
+the host's SHIELD EFFECTS in Player Options; upstream's text chat is left
+out (its messages are dropped). A game on a Custom Edition map can be
 joined: the map comes from the game's players
 ([Custom Edition maps](#custom-edition-maps)).
 

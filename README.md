@@ -109,13 +109,17 @@ offered again ([Install: Updating](docs/INSTALL.md#updating)).
   ([Install: Updating](docs/INSTALL.md#updating)).
 - A spawn menu, after [AlphaRing](https://github.com/kirklandsig/AlphaRing)'s: the map's vehicles, weapons,
   equipment and AI characters, placed in front of you, and the game's cheats
-  (god mode, infinite ammo, one-hit kills and more). In single player and
-  for the host of a co-op or multiplayer game, never for a player who
-  joined: hold SELECT and press D-pad Down
+  (god mode, infinite ammo, one-hit kills and more), and Teleport everyone
+  to me, which brings every other player beside you (for a big online game
+  where someone is stuck). In single player and for the host of a co-op or
+  multiplayer game, never for a player who joined: hold SELECT and press
+  D-pad Down
   ([Install: the spawn menu](docs/INSTALL.md#the-spawn-menu)).
 - Upstream's online play: the campaign in co-op and multiplayer, over the
   internet (a server browser of public games) or the local network, with
   the PC version's menus ([Install: playing online](docs/INSTALL.md#playing-online)).
+  Network version 38, with OpenCE's own gametypes: SWAT, Infection, Gun
+  Game and Hardcore, in Select Gametype's OPENCE bank.
 - Upstream's Halo Custom Edition maps, beside the Xbox game's: the
   community's multiplayer and campaign maps in `halo/custom_maps/`. Joining
   a game on one you don't have downloads it from the game's players
