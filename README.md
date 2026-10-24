@@ -229,6 +229,14 @@ With PortMaster (on Knulli or another firmware) instead: put
 start PortMaster, then copy the disc image into `ports/halo/`
 ([Install](docs/INSTALL.md#installing-with-portmaster)).
 
+On a Batocera PC (x86-64) instead: unzip
+`halo-ce-batocera-pc-<version>.zip` into `/userdata` (over the network,
+`\\BATOCERA\share`), put the disc image, or the Xbox game's `maps/` folder,
+in `roms/ports/halo-pc/`, and start Halo CE (PC build) from Ports. It is the
+decompilation's own 32-bit Linux build with this port's additions (Bot
+Match, the spawn menu), and it installs each new release by itself before
+it starts ([Batocera PCs](port/knulli/README.md#batocera-pcs)).
+
 The resulting layout:
 
 ```

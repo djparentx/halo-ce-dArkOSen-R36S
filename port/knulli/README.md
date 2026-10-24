@@ -61,6 +61,7 @@ replaced or added:
 | `host/host_gl_timing.c`, `.S` | A timer of the driver's functions (`HALO_GL_TIMING`). |
 | `compat/android/log.h` | The NDK's log functions, to the standard error stream. |
 | `Halo.sh`, `sdl_mapping.py`, `halo_extract.py`, `halo_screen.py`, `halo_update.py` | The launcher: the controls, the clocks, the first start's maps, updates, and messages on the screen while the game is not running. |
+| `batocera/Halo.sh`, `batocera/Halo.sh.keys` | The Batocera PC build's launcher (below). |
 
 ### The GL thread
 
@@ -221,7 +222,24 @@ anything else, and the launcher starts no game while the journal is there.
 other button, or 30 seconds, plays the installed version, and that release
 is not offered again (`save/update-declined`). `update.auto = false` turns
 it off. Exit status 10 makes the launcher start itself again (the new
-one); 11 stops it.
+one); 11 stops it. The Batocera PC build's launcher has no screen to ask on
+(X has the display there, not the framebuffer): its zip is installed
+unasked, with nothing shown.
+
+## Batocera PCs
+
+Each release also has `halo-ce-batocera-pc-<version>.zip`: the
+decompilation's portable 32-bit x86 Linux build of the same tree (`ninja
+linux`, configured `--portable`; the top-level `build.sh` makes it with
+`BATOCERA_PC=1`), for Batocera on x86-64 PCs, with this port's additions
+(Bot Match, the spawn menu, the controls). Unzip it into `/userdata`:
+`roms/ports/Halo CE (PC build).sh`, its `.keys` file (hotkey and START
+quit), and `roms/ports/halo-pc/`, where the Xbox game's `maps/` folder goes,
+or a disc image the first start copies it out of (a few minutes, with the
+screen black). The launcher points the 32-bit PipeWire client at
+Batocera's 32-bit plugins, then updates the game as above before it
+starts. Played on Batocera 43.1 (Radeon 780M, two Xbox 360 pads); other
+Batocera versions are untested.
 
 ### Clocks
 

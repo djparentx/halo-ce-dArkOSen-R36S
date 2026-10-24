@@ -15,6 +15,10 @@
 #   WORK         the working folder (default: work/ next to this script)
 #   DIST         the output folder (default: dist/ next to this script)
 #   JOBS         parallel jobs (default: the number of processors)
+#   BATOCERA_PC  1: also the Batocera PC build, in dist/batocera-pc (the
+#                decompilation's portable 32-bit x86 Linux build of the same
+#                tree; it downloads Debian 11's i386 libraries and SDL3's
+#                source, and needs cmake and wayland-scanner)
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -48,6 +52,10 @@ need "$HOST_CC" "install gcc-aarch64-linux-gnu, or set HOST_CC"
 need "$GUEST_CC" "install clang-22 from apt.llvm.org, or set GUEST_CC to a clang with the arm64_32 target"
 "$GUEST_CC" -print-targets 2> /dev/null | grep -q aarch64_32 ||
 	die "$GUEST_CC has no arm64_32 (aarch64_32) target; use clang 22 from apt.llvm.org"
+if [ -n "${BATOCERA_PC:-}" ]; then
+	need cmake "install cmake (the Batocera PC build makes its own SDL3)"
+	need wayland-scanner "install libwayland-bin (SDL3's Wayland support, in the Batocera PC build)"
+fi
 
 [ -n "${ANDROID_NDK:-}" ] ||
 	die "set ANDROID_NDK to the Android NDK r28c folder (it builds the guest and has the GLES and EGL headers)"
@@ -145,12 +153,14 @@ sh "$SRC/port/knulli/glibc_sysroot.sh" "$GLIBC_SYSROOT"
 # ---------- build
 
 cd "$SRC"
-# (again for another upstream commit: its configure.py can need other files)
-if [ ! -f build.ninja ] || [ "$(cat "$WORK/configured.commit" 2> /dev/null || true)" != "$UPSTREAM_COMMIT" ]; then
+# (again for another upstream commit, whose configure.py can need other files,
+# or other options: --portable is the Linux build's alone, for the Batocera PC)
+configure=(--release --portable --android-ndk "$ANDROID_NDK" --android-guest-cc "$GUEST_CC" --linux-cc "$GUEST_CC")
+configured="$UPSTREAM_COMMIT ${configure[*]}"
+if [ ! -f build.ninja ] || [ "$(cat "$WORK/configured.commit" 2> /dev/null || true)" != "$configured" ]; then
 	echo "== configuring"
-	python3 configure.py --release --android-ndk "$ANDROID_NDK" --android-guest-cc "$GUEST_CC" \
-		--linux-cc "$GUEST_CC"
-	echo "$UPSTREAM_COMMIT" > "$WORK/configured.commit"
+	python3 configure.py "${configure[@]}"
+	echo "$configured" > "$WORK/configured.commit"
 fi
 grep -q 'halo_guest\.elf' build.ninja ||
 	die "build.ninja has no Android guest build: delete $SRC/build.ninja and check configure's output (it downloads musl and SDL3)"
@@ -158,11 +168,22 @@ grep -q 'halo_guest\.elf' build.ninja ||
 echo "== building (this takes a while the first time)"
 SDL2_INCLUDE=$SDL2_INCLUDE SYSROOT_LIB=$SYSROOT_LIB ANDROID_NDK=$ANDROID_NDK GLIBC_SYSROOT=$GLIBC_SYSROOT \
 	CC=$HOST_CC JOBS=$JOBS sh port/knulli/build.sh
+if [ -n "${BATOCERA_PC:-}" ]; then
+	echo "== building the Batocera PC build"
+	ninja -j "$JOBS" linux
+fi
 
-# ---------- dist: what goes on the handheld
+# ---------- dist: what goes on the handheld (and in batocera-pc/, on a
+# Batocera PC: the launcher there is "Halo CE (PC build).sh")
 
 install -m 755 build/knulli/halo build/knulli/halo_guest.elf port/knulli/Halo.sh port/knulli/halo_extract.py \
 	port/knulli/halo_screen.py port/knulli/sdl_mapping.py port/knulli/halo_update.py "$DIST/"
 install -m 644 port/knulli/config.default.toml port/assets/network/brokers.txt "$DIST/"
+if [ -n "${BATOCERA_PC:-}" ]; then
+	mkdir -p "$DIST/batocera-pc"
+	install -m 755 build/linux/halo build/linux/libSDL3.so.0 port/knulli/batocera/Halo.sh port/knulli/halo_extract.py \
+		port/knulli/halo_screen.py port/knulli/halo_update.py "$DIST/batocera-pc/"
+	install -m 644 port/knulli/batocera/Halo.sh.keys port/assets/network/brokers.txt "$DIST/batocera-pc/"
+fi
 echo "== done: $DIST"
 ls -l "$DIST"

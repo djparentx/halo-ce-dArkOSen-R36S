@@ -7,9 +7,12 @@ Knulli zip, or the PortMaster zip for PortMaster's launcher) is downloaded,
 checked against the SHA-256 GitHub gives for it, and its files put in place
 of the installed ones; maps/, save/, custom_maps/ and config.toml are never
 touched. Any other button, or 30 seconds, plays the installed version, and
-that release is not offered again (the next one is).
+that release is not offered again (the next one is). The launcher of the
+Batocera PC build (port/knulli/batocera) has nothing to ask on before the
+game opens its window, as X has the screen there, not the framebuffer: its
+zip is installed unasked, and nothing is shown.
 
-    halo_update.py <game folder> <launcher> <knulli|portmaster>
+    halo_update.py <game folder> <launcher> <knulli|portmaster|batocera-pc>
 
 Exit status 10: updated (the launcher starts itself again); 11: an update
 stopped part way and could not be finished (the files are a mix of two
@@ -48,7 +51,10 @@ import halo_screen  # noqa: E402
 REPOSITORY = "kirklandsig/halo-ce-anbernic-rg35xx"
 LATEST = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 # the zips' own folders, by install kind: the launcher's name, the game's folder
-LAYOUTS = {"knulli": ("roms/ports/Halo.sh", "roms/ports/halo/"), "portmaster": ("Halo.sh", "halo/")}
+LAYOUTS = {"knulli": ("roms/ports/Halo.sh", "roms/ports/halo/"), "portmaster": ("Halo.sh", "halo/"),
+           "batocera-pc": ("roms/ports/Halo CE (PC build).sh", "roms/ports/halo-pc/")}
+# the installs updated unasked, with no screen
+UNASKED = ("batocera-pc",)
 # never replaced, should a zip hold them (VERSION is written once all the
 # rest is in place)
 KEPT_FILES = ("config.toml", "VERSION")
@@ -336,8 +342,9 @@ def zip_target(name, kind, game, launcher):
     one no release holds (a name not in its plain form, or outside its
     folders)"""
     launcher_name, folder = LAYOUTS[kind]
-    if name == launcher_name:
-        return launcher
+    # (and the launcher's controls for Batocera, beside it)
+    if name in (launcher_name, launcher_name + ".keys"):
+        return launcher + name[len(launcher_name):]
     if not name.startswith(folder):
         raise ValueError(f"a file the zip should not hold: {name}")
     parts = name[len(folder):].split("/")
@@ -426,7 +433,8 @@ def resume(game, launcher, kind):
         return None
     screen = None
     try:
-        screen = halo_screen.open_screen()
+        if kind not in UNASKED:
+            screen = halo_screen.open_screen()
     except Exception as error:  # (as say's)
         log(f"the screen: {error}")
     say(screen, "Finishing the update", "The last update stopped part way: putting its files in place.")
@@ -452,9 +460,37 @@ def resume(game, launcher, kind):
     return UPDATED
 
 
+def offer(tag, installed, size, declined):
+    """the release offered on the screen: the screen when START takes it,
+    None otherwise (no screen or buttons; another button or 30 seconds, and
+    that release is not offered again)"""
+    screen = halo_screen.open_screen()
+    if not screen:
+        log("no screen to ask on; playing")
+        return None
+    say(screen, "Update available", f"Halo {tag} is out (this is {installed}).\n\n"
+        f"Press START to update now: about {size // (1024 * 1024) + 1} MB, and your maps, saves "
+        "and settings stay.\n\nPress any other button to play this version (it is not offered "
+        "again; turn checking off in Settings, Network Setup, CHECK FOR UPDATES).")
+    key = wait_for_key(30)
+    if key == NO_INPUT:
+        log("no buttons to answer with; playing")
+        return None
+    if key not in start_codes():
+        log(f"{tag} not taken now")
+        try:
+            os.makedirs(os.path.dirname(declined), exist_ok=True)
+            with open(declined, "w", encoding="utf-8") as file:
+                file.write(tag + "\n")
+        except OSError:
+            pass
+        return None
+    return screen
+
+
 def main():
     if len(sys.argv) != 4 or sys.argv[3] not in LAYOUTS:
-        raise SystemExit(f"usage: {sys.argv[0]} <game folder> <launcher> <knulli|portmaster>")
+        raise SystemExit(f"usage: {sys.argv[0]} <game folder> <launcher> <{'|'.join(LAYOUTS)}>")
     game, launcher, kind = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2]), sys.argv[3]
     resumed = resume(game, launcher, kind)
     if resumed is not None:
@@ -484,27 +520,11 @@ def main():
     if not newest or newest <= current:
         return 0
     log(f"{tag} is out (installed: {installed})")
-    screen = halo_screen.open_screen()
-    if not screen:
-        log("no screen to ask on; playing")
-        return 0
-    say(screen, "Update available", f"Halo {tag} is out (this is {installed}).\n\n"
-        f"Press START to update now: about {size // (1024 * 1024) + 1} MB, and your maps, saves "
-        "and settings stay.\n\nPress any other button to play this version (it is not offered "
-        "again; turn checking off in Settings, Network Setup, CHECK FOR UPDATES).")
-    key = wait_for_key(30)
-    if key == NO_INPUT:
-        log("no buttons to answer with; playing")
-        return 0
-    if key not in start_codes():
-        log(f"{tag} not taken now")
-        try:
-            os.makedirs(os.path.dirname(declined), exist_ok=True)
-            with open(declined, "w", encoding="utf-8") as file:
-                file.write(tag + "\n")
-        except OSError:
-            pass
-        return 0
+    screen = None
+    if kind not in UNASKED:
+        screen = offer(tag, installed, size, declined)
+        if not screen:
+            return 0
     try:
         tag, archive, digest = fetch(kind, game, screen, release)
         say(screen, f"Installing {tag}", "Putting the new files in place.")
@@ -515,11 +535,13 @@ def main():
         shutil.rmtree(os.path.join(game, PARTIAL), ignore_errors=True)
         log(f"failed: {error}")
         say(screen, "Update failed", f"{error}\n\nThe installed version is unchanged. Press a button to play it.")
-        wait_for_key(30)
+        if screen:
+            wait_for_key(30)
         return 0
     log(f"updated to {tag}")
     say(screen, "Updated", f"Halo {tag} is installed. Starting it.")
-    time.sleep(1.5)
+    if screen:
+        time.sleep(1.5)
     return UPDATED
 
 
