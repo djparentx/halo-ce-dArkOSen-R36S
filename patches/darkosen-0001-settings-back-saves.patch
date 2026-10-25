@@ -1,5 +1,5 @@
 diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.audio_settings.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.audio_settings.xml
-index 55a92dd..3ea630e 100644
+index 2d164a1..529e37c 100644
 --- a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.audio_settings.xml
 +++ b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.audio_settings.xml
 @@ -2,8 +2,8 @@
@@ -29,7 +29,7 @@ index c604958..c09c53b 100644
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/options_menu"/>
  	</widget>
 diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.mouse_settings.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.mouse_settings.xml
-index a26889d..191586d 100644
+index a359068..522ac68 100644
 --- a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.mouse_settings.xml
 +++ b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.mouse_settings.xml
 @@ -2,8 +2,8 @@
@@ -44,7 +44,7 @@ index a26889d..191586d 100644
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mouse_settings/options_menu"/>
  	</widget>
 diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.xml
-index c5677d8..9cb6138 100644
+index 0823fd3..d9c54af 100644
 --- a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.xml
 +++ b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.xml
 @@ -2,8 +2,8 @@
@@ -59,7 +59,7 @@ index c5677d8..9cb6138 100644
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/network_setup/options_menu"/>
  	</widget>
 diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.xml
-index b87c382..6d59a14 100644
+index e30060b..406cd34 100644
 --- a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.xml
 +++ b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.xml
 @@ -2,8 +2,8 @@
@@ -89,10 +89,10 @@ index ce9faa7..9ee4d1a 100644
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_edit_select_list"/>
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_label" x="293" y="375"/>
 diff --git a/port/linux/game/menu_functions.c b/port/linux/game/menu_functions.c
-index e461635..00d10cb 100644
+index 596ee76..5147eed 100644
 --- a/port/linux/game/menu_functions.c
 +++ b/port/linux/game/menu_functions.c
-@@ -22,6 +22,8 @@ calls them from PC_MENU_FUNCTION_BASE on):
+@@ -24,6 +24,8 @@ calls them from PC_MENU_FUNCTION_BASE on):
    "profile.<field>" the controller's in the profile being edited;
  - "port setting save", on its deleted event, writes the value shown back,
    if the player changed it;
@@ -101,7 +101,7 @@ index e461635..00d10cb 100644
  - the settings screens' (tools/port_settings.py): "port settings save"
    (OK) writes those changed and applies the window's (the rest follow
    config.toml themselves), "port settings defaults" shows the defaults,
-@@ -3800,6 +3802,21 @@ static boolean profile_save_changes(struct widget_instance *widget, boolean *wid
+@@ -4133,6 +4135,21 @@ static boolean profile_settings_save(struct widget_instance *widget)
  	return TRUE;
  }
  
@@ -123,9 +123,9 @@ index e461635..00d10cb 100644
  /* "port pause end game" (the in-game pause menu's END GAME, the host's:
  menu_tags.c's pause_patch): the game ends as its time limit would, its
  players staying for the next (the carnage report, then the host's PICK GAME) */
-@@ -5095,6 +5112,10 @@ boolean pc_menu_event_function_invoke(
+@@ -5728,6 +5745,10 @@ boolean pc_menu_event_function_invoke(
  		{
- 			return profile_save_changes(widget, widget_deleted);
+ 			return profile_settings_save(widget);
  		}
 +		else if (!strcmp(name, "port profile save and end"))
 +		{
@@ -135,13 +135,13 @@ index e461635..00d10cb 100644
  		{
  			return direct_link_from_clipboard();
 diff --git a/port/linux/game/menu_tags.c b/port/linux/game/menu_tags.c
-index ba9dfac..d8efd30 100644
+index 1d12157..9aa10de 100644
 --- a/port/linux/game/menu_tags.c
 +++ b/port/linux/game/menu_tags.c
-@@ -372,6 +372,8 @@ static char const *const port_function_names[] =
- 	"player profile save changes",
- 	/* (the server browser's password screen) */
- 	"port password init", "port password edit", "port password join", "port password back",
+@@ -391,6 +391,8 @@ static char const *const port_function_names[] =
+ 	/* (a new profile's screens: Settings' is then being edited, which the
+ 	Xbox's leaves to its own screens) */
+ 	"new campaign decision",
 +	/* (Settings' B and BACK: the profile's changes saved, as OK saves them) */
 +	"port profile save and end",
  };

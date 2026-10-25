@@ -26,6 +26,7 @@ File paths are relative to the upstream tree as `build.sh` prepares it
 - [The GL thread](#the-gl-thread)
 - [The Direct3D 8 renderer on OpenGL ES](#the-direct3d-8-renderer-on-opengl-es)
 - [Changes to the game's rasterizer](#changes-to-the-games-rasterizer)
+- [The spawn menu](#the-spawn-menu)
 - [Data flow](#data-flow)
 - [Source map](#source-map)
 
@@ -1200,6 +1201,66 @@ The port multiplies the size by `xgpu_model_detail_scale()`, which is
 `display.model_detail` times `display.render_scale`: objects switch to their
 simpler models sooner, and detail beyond the rendered pixels is not drawn.
 
+## The spawn menu
+
+`port/linux/game/spawn_menu.c`, after AlphaRing's Halo CE spawn menu
+(`src/mcc/spawn/halo1.cpp` in [AlphaRing](https://github.com/kirklandsig/AlphaRing)), lists the loaded map's
+vehicle, weapon, equipment and actor variant tags (`tag_iterator_next`) and
+places one in front of the player. It is the game's own: the gate is
+`game_connection()`, local or network server, checked when the menu opens
+and again when a spawn is made, so a client never has it. A spawn is made
+as the retail cheats make objects (`object_placement_data_new`,
+`object_new`), and a character as a script's `ai_attach_free` makes an
+actor (`actor_customize_unit`, `ai_scripting_attach_free`); a unit left
+without an actor is deleted. In a network game the host's objects and actors
+reach the clients as its others do, and nothing new is sent.
+
+Its last page, CHEATS, flips the game's own cheat flags (`struct
+cheat_globals cheat`, `source/game/cheats.h`): god mode
+(`deathless_player`), infinite ammo, bottomless clip, one-hit kills
+(`omnipotent`), super jump, jetpack, Medusa and bump possession. A row
+camouflages the menu's player, as `cheat_active_camouflage_local_player`
+does, and the last, Teleport everyone to me, places every other player with
+a living unit beside the menu's, facing it, through the co-op scripts'
+placement (`coop_scripts_place`, upstream's `coop_scripts_arrive_at` without
+its co-op check: the spot, beside those already there, or rings round it in
+its sight). The host moves only its own copies: a client's machine puts its
+own player where the host has it once that is far from its own, as for a
+teleporter, so nothing new is sent and any client of the same network
+version follows (`debug.network_test_teleport` does it once in a
+network test). A flag is flipped on the game's thread, and those the menu turned on
+are put back each tick while the machine is the game's. The flags are
+global, so every player has them, bots included; on a client
+`cheats_network_client_enforce` zeroes them each tick, so a player who
+joined plays by the host's rules. The page's own row, God mode (just us),
+keeps alive only this machine's players (those with a `local_player_index`:
+not a bot, nor a player who joined), while the machine is the game's:
+`damage.c`'s two god mode tests ask `spawn_menu_deathless`, which answers
+for the game's cheat or for that row. As with the game's, a vehicle
+carrying one of them is kept too, and with it whoever else rides in it.
+
+Six hooks join it to the game:
+
+- `XInputGetState` (`port/linux/src/xinput_sdl.c`) passes each controller's
+  pad through `spawn_menu_pad`, which opens the menu on Back held with D-pad
+  Down pressed and, while it is open, takes the pad but for the left
+  stick's left and right and the right stick (the player steps to the side
+  and turns, so that what is spawned can be spread out); buttons held as it
+  closes stay out of the game until they are let go. START closes it and
+  goes on to the game, which pauses.
+- `halo_keyboard_actions` and `halo_linux_mouse_look` give nothing for the
+  first controller while the menu has it (the player moves only by the pad's sticks), and
+  no script sees an action. (`director_inhibit_input`, which the cheats' Back
+  combos use, clears the player's input only after the scripts' action
+  tests have seen it.)
+- `main.c` makes a spawn or a cheat asked for on the game's thread, beside
+  `cheats_update`.
+- `interface_draw_fullscreen_overlays` draws it after the console, in the
+  terminal font.
+- `game_dispose_from_old_map` closes it, so no old map's tag is spawned.
+- `damage.c` asks `spawn_menu_deathless` whether god mode keeps a unit
+  alive.
+
 ## Data flow
 
 The path of a frame's work, from the game's code to the screen:
@@ -1256,6 +1317,7 @@ between ticks, so the frame rate can exceed the tick rate.
 | --- | --- | --- |
 | `port/knulli/host/host_main.c` | Entry point, paths, guest environment, logging | new |
 | `port/knulli/host/host_sdl2.c` | SDL3 calls answered by SDL2; exit combination; frame statistics (`HALO_FPS_LOG`) | new |
+| `port/linux/src/dpad_controls.c` | The D-pad in place of a missing stick (`input.dpad_controls`), fed by `xinput_sdl.c` | new |
 | `port/knulli/host/host_sdl3_events.c`, `host_knulli.h` | SDL3 event layout and numbering | new |
 | `port/knulli/host/host_glthread.c`, `host_glthread.h` | The GL thread, host operations, frame pacing, buffer writes made by the game's thread, GPU pass timer, the GL thread's frame split | new |
 | `port/knulli/glthread_gen.py` | Generates the recording and replay functions | new |
@@ -1274,6 +1336,8 @@ between ticks, so the frame rate can exceed the tick rate.
 | `port/linux/src/nv2a_vsh.c`, `nv2a_psh.c` | Shader translation: outputs, constants, precision, blur | patched |
 | `port/linux/src/xbox_textures.c` | 16-bit texels, opacity | patched |
 | `port/linux/src/port_config.c` | The new settings | patched |
+| `port/linux/game/spawn_menu.c`, `.h` | The spawn menu | new |
+| `port/linux/src/xinput_sdl.c`, `source/interface/interface.c`, `source/main/main.c`, `source/game/game.c`, `source/objects/damage.c` | The spawn menu's hooks | patched |
 | `port/linux/src/xgpu.h`, `gl.h` | Shared declarations; the new GL functions | patched |
 | `tools/android_gl_stubs.py` | `guest_gl_before_call` in the generated stubs | patched |
 | `source/rasterizer/xbox/rasterizer_xbox_models.c` | Models sorted by shader | patched |

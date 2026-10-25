@@ -94,7 +94,7 @@ compile() {
 	objects="$objects $object"
 }
 
-for source in host_debug host_gl host_loader host_memory host_syscall host_thread; do
+for source in host_debug host_gl host_loader host_memory host_syscall host_thread host_watch_hash; do
 	compile port/android/host/$source.c
 done
 compile port/darkosen/host/host_main.c
@@ -104,6 +104,7 @@ compile port/darkosen/host/host_gl_timing.c
 compile port/darkosen/host/host_gl_timing.S
 # the GL thread's recording functions, from the functions the guest imports
 python3 port/darkosen/glthread_gen.py build/android/guest/gen/gl_imports.list "$KHRONOS/GLES3/gl32.h" \
+	"$KHRONOS/GLES2/gl2ext.h" \
 	"$OUT/host_glthread_gen.c.new"
 cmp -s "$OUT/host_glthread_gen.c.new" "$OUT/host_glthread_gen.c" || mv "$OUT/host_glthread_gen.c.new" "$OUT/host_glthread_gen.c"
 rm -f "$OUT/host_glthread_gen.c.new"
@@ -117,6 +118,15 @@ compile port/linux/src/posix_upnp.c $MINIUPNPC
 for source in port/third_party/miniupnpc/src/*.c; do
 	# shellcheck disable=SC2086
 	compile "$source" $MINIUPNPC
+done
+# internet play's DTLS with browsers (posix_dtls.c, with Mbed TLS), as the
+# Android app's host library has it
+MBEDTLS="-Iport/third_party/mbedtls/include -Iport/third_party/mbedtls/library"
+# shellcheck disable=SC2086
+compile port/linux/src/posix_dtls.c $MBEDTLS
+for source in port/third_party/mbedtls/library/*.c; do
+	# shellcheck disable=SC2086
+	compile "$source" $MBEDTLS -w
 done
 compile port/third_party/tomlc17/tomlc17.c -w
 compile build/android/host/host_import_table.c

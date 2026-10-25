@@ -498,6 +498,57 @@ location for them): GL_INVALID_OPERATION at every draw and a30 held at 50
 fps, until the location was marked absent. The GL thread's health check
 ([Architecture](ARCHITECTURE.md#the-gl-thread)) showed the error; a trace of each command's error found the call.
 
+## Upstream at 8102e711: network version 29, Custom Edition maps (2026-10-15)
+
+The port moved to upstream's build 206: network version 29, Halo Custom
+Edition maps and their sharing, voice chat (the handheld only listens),
+votes to kick, co-op fixes, and upstream's own renderer work, part of which
+does what the port already did (decal ordering, sampler objects, visibility
+results without waiting); the port's versions are kept where both did the
+same thing. The game image is 18.6 MB (17.2 before), and the game holds
+about 10 MB more in the b30 battle.
+
+The first build of the merge was 2 to 5% slower. Profiles of the game's
+thread (`HALO_PROFILE_HZ`), release against merge, found two causes:
+
+- Upstream now puts the PC menus' tags in every map (the pause menu's
+  SETTINGS), and the menus' bitmaps were searched one by one for every 4x4
+  texture a draw binds: 1.5% of the game's thread in a30. They are found
+  through a hash now.
+- Upstream's checks of every tag lookup (its index, its group) made
+  `tag_get` a function with a stack frame and six registers saved at each
+  call, for the rare path that gives an empty tag: 0.7% of the game's
+  thread in the b30 battle before, 2.9% after. A tag of the group is now
+  answered first, with the same checks and no call.
+
+Also removed: the record of which registers an immediate draw wrote, which
+only upstream's own immediate draws read (0.7%).
+
+On the RG35XX H, 60 s, EmulationStation stopped (and so no sound), render
+scale 0.75, the two builds run in turn, the second (warm) run of each, the
+samples after the first (the level's load):
+
+| Scene | v2026.10.11 | first merge | v2026.10.11 | released |
+| --- | --- | --- | --- | --- |
+| a30 | 54.2 | 51.9 | 53.8 | 51.6 |
+| b30 | 50.3 | 48.8 | 50.0 | 49.1 |
+| c10 | 58.6 | 57.9 | 58.8 | 57.9 |
+
+(each pair from its own runs; the handheld ran warmer for the second.) The
+fixes took the game's thread's extra time down, which shows in b30's
+battle; the rest is upstream's added work: its checks, and what runs in a
+level that did not before. In a30's Pelican both builds hold about 50 fps
+at the same scale, with the release now and then a five seconds' window
+at 60: frame pacing turns a little more time a frame into a lower step.
+
+The bots (upstream's PR #367, Multiplayer's BOT MATCH) cost nothing outside
+a game with bots: against the same build without them, the warm second
+runs gave a30 52.3 and 51.9 against 52.3, b30 49.3 and 48.9 against 49.0.
+A local Slayer game on Blood Gulch (`debug.network_test = "local:..."`,
+90 s, the samples after the first) holds 59.5 with no bots and 59.4 with
+seven Heroic ones: the game's thread has room for their searches and aim
+there.
+
 ## Upstream's game logic for many enemies (2026-10-06)
 
 Upstream's commit 197c1994 sped up its many-enemy co-op games (484 actors,

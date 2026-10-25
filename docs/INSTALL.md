@@ -21,6 +21,8 @@ Xbox game.
 - [The first launch](#the-first-launch)
 - [Playing](#playing)
 - [Controls](#controls)
+- [The spawn menu](#the-spawn-menu)
+- [Bot Match](#bot-match)
 - [Where things are](#where-things-are)
 - [What the launcher changes on the handheld](#what-the-launcher-changes-on-the-handheld)
 - [Playing online](#playing-online)
@@ -239,13 +241,104 @@ the bottom); what matters is the position.
 | L3, R3 (stick clicks, where the handheld has them) | left and right stick clicks | crouch, zoom |
 | D-pad | D-pad | |
 | START | start | pause menu |
-| SELECT | back | |
+| SELECT | back | with D-pad Down, the [spawn menu](#the-spawn-menu) |
+
+On a handheld with one analog stick or none (the RG40XX V; the RG35XX
+Plus, SP and 2024, the RG34XX), the D-pad takes the missing stick's place
+in a game, from v2026.10.21 (`input.dpad_controls`; not yet tried on those
+handhelds, [#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)):
+
+| Handheld | D-pad | With L1 held |
+| --- | --- | --- |
+| One stick (it moves) | aims | aims; A crouches, B zooms |
+| No sticks | Up and Down walk, Left and Right turn | Up and Down look, Left and Right strafe; A crouches, B zooms |
+
+L1 pressed and let go by itself is still the flashlight. In the menus and
+the spawn menu, and with SELECT held, the D-pad is the D-pad. The view
+turns as fast as the game's look sensitivity setting says.
+`input.dpad_controls = "off"` keeps the game's own D-pad (walking and
+strafing); `"on"` uses the controls without sticks on any controller.
 
 **To quit, hold the hotkey (MENU), or SELECT, and press START.** The game
 exits, and the launcher restores the clocks and returns to EmulationStation.
 
 If you have remapped the handheld's controls in EmulationStation, the game
-follows that mapping.
+follows that mapping. It reads Batocera's and Knulli's names for the
+controls and those of ArkOS and EmuELEC. A firmware whose EmulationStation
+names the face buttons by the Xbox layout gets A and B (and X and Y) swapped:
+an empty file named `no_face_swap` in `roms/ports/halo/` takes them as they
+are named. The PortMaster zip uses PortMaster's own mapping instead.
+
+## The spawn menu
+
+Hold SELECT and press D-pad Down during a game to open the spawn menu, after
+[AlphaRing](https://github.com/kirklandsig/AlphaRing)'s for The Master Chief Collection on PC: the vehicles, weapons, equipment and
+AI characters the loaded level has, placed in front of you. It works in
+single player and for the host of a co-op or multiplayer game. A player who
+joined someone else's game can't open it, so the host decides. What the host
+spawns reaches the other players as the host's other objects do; nothing new
+is sent over the network.
+
+| Handheld (RG35XX H) | In the menu |
+| --- | --- |
+| L1, R1 | the previous or next page: vehicles, weapons, equipment, characters, cheats |
+| D-pad Up and Down, or the left stick's up and down | pick |
+| Left stick left and right | step to the side, the menu open |
+| Right stick | turn, the menu open |
+| D-pad Left and Right | a character's side: their own, an ally of yours, or an enemy |
+| B (bottom) | spawn; on the cheats page, the cheat on or off |
+| A (right) | close |
+| START | close and pause |
+
+The menu names the buttons as the Xbox controller does (A spawns, B
+closes), as the game's own prompts do. While it is open you can step left
+and right and turn, so that what you spawn lands in a new place each time
+rather than on top of the last; you don't walk forward or back, fire or
+jump until it closes.
+Each level lists only what it has loaded, so the lists change from level to
+level. An ally fights on your side, an enemy against you; "their own" keeps
+the character's own side (an Elite stays Covenant).
+
+The last page, CHEATS, turns the game's own cheats on and off: god mode,
+infinite ammo, bottomless clip, one-hit kills, super jump, jetpack, Medusa
+(enemies that see you die) and bump possession (walk into a character to
+take it over). Active camouflage makes you invisible for a while.
+Teleport everyone to me, the last row, brings every other player with a
+character beside you, facing you, the bots too: in a big online game,
+whoever is stuck comes to you. The players who joined follow on their own
+machines, as they follow any teleport of the host's, so it works with
+everyone in your game, whatever build they play. The cheats are the game's, so every player in the
+game has them, the players who joined and the bots too: with god mode on in
+a Bot Match no one dies, and with one-hit kills the bots kill in one hit as
+well. God mode (just us), the row under God mode, keeps alive only the
+players on this handheld or PC: not the bots, nor the players who joined.
+A cheat stays on, from level to level, until you turn it off or quit
+Halo. Only the host has the page, as the rest of the menu; a player who
+joined someone else's game plays by that host's rules.
+
+## Bot Match
+
+MULTIPLAYER > BOT MATCH, under Create Game, plays Slayer against computer
+players on the handheld alone, with no network:
+
+1. Set the bots. BOTS: how many, 1 to 15. SKILL: Easy, Normal, Heroic or
+   Legendary (how soon they react, how well they aim, how far they see).
+   TEAMS, for Team Slayer: EVEN puts bots on both teams, evening them with
+   you; VS YOU puts them all on the other team. DEFAULTS sets 7, Normal,
+   Even. OK goes on.
+2. Choose the map, then the game type. The bots play Slayer and Team
+   Slayer, the built-in ones and those you made in Edit Gametypes; in
+   another kind of game (Capture the Flag, Oddball, King of the Hill, Race)
+   no bot joins.
+3. In the lobby (Enlisted Players), press A to join; the bots join with
+   you. A starts the match, X holds the countdown, B goes back.
+
+After the match, the carnage report's A picks the next map and game type,
+and B there goes back to the main menu. The settings are kept in
+`config.toml` (`bots.count`, `bots.skill`, `bots.teams`:
+[Configuration](CONFIGURATION.md#bots)). You are the game's host, so the
+[spawn menu](#the-spawn-menu) works in a Bot Match too. Bots play only in
+Bot Match: not in internet or LAN games.
 
 ## Where things are
 
@@ -258,6 +351,7 @@ Everything the game writes is in `/userdata/roms/ports/halo/`:
 | `config.toml` | The settings ([Configuration](CONFIGURATION.md)). |
 | `init.txt` | Optional: console commands run at start-up, one per line. For example `map_name levels\b30\b30` starts The Silent Cartographer directly. |
 | `maps/` | The extracted game data. |
+| `custom_maps/` | Halo Custom Edition maps and their resource maps, yours and those downloaded in online games ([Custom Edition maps](#custom-edition-maps)). |
 | `save/` | The game's writable Xbox drives, each a folder named after its drive letter, with the saved games and player profiles. |
 | `save/shaders/` | The compiled shader programs. Safe to delete; they are compiled again. |
 | `profile.txt` | Only when profiling ([Profiling](PROFILING.md)). |
@@ -321,11 +415,43 @@ Updating from a version before co-op turns it on once; after that your
 choice is kept.
 
 Every machine in a game has to run the same network version, and the
-server browser lists only games of its own. From v2026.10.08 the handheld
-plays version 24, upstream's from 2026-10-08, with the PC and Android builds
-of that day on. When upstream raises the version again, the handheld needs a
-new release to see their games. A game on a Custom Edition map can't be
-joined from the handheld.
+server browser lists only games of its own. From v2026.10.23 the handheld
+plays version 38, upstream's from 2026-10-24, with the PC and Android
+builds of that day on, and with people playing OpenCE's web build in
+a browser: a browser connects over WebRTC, which the handheld answers (DTLS,
+with Mbed TLS). When upstream raises the version again, the handheld needs a
+new release to see their games. Version 38 brings OpenCE's gametypes
+(SWAT, Infection, Gun Game and Hardcore: Select Gametype's OPENCE bank,
+and OPENCE OPTIONS in Edit Gametypes), co-op's ALLY FRIENDLY FIRE, and
+the host's SHIELD EFFECTS in Player Options; upstream's text chat is left
+out (its messages are dropped). A game on a Custom Edition map can be
+joined: the map comes from the game's players
+([Custom Edition maps](#custom-edition-maps)).
+
+Upstream's voice chat needs a microphone to talk, which the handhelds don't
+have: the handheld doesn't send any voice.
+
+## Custom Edition maps
+
+Halo Custom Edition's maps run beside the Xbox game's, with upstream's
+loader: the community's multiplayer maps, and campaign maps. They need
+Custom Edition's three resource maps.
+
+1. Copy `bitmaps.map`, `sounds.map` and `loc.map` into
+   `roms/ports/halo/custom_maps/` (the game makes the folder at its first
+   start). They are in the `maps` folder of a Halo Custom Edition install on
+   a PC, or in `halo1/maps/custom_edition/` of Halo: The Master Chief
+   Collection on PC (not the files directly in `halo1/maps`).
+2. Copy the maps (`.map`) into the same folder.
+
+The maps are listed as CUSTOM MULTIPLAYER and CUSTOM SINGLEPLAYER. Maps that
+need OpenSauce don't run. Online, joining a game on a Custom Edition map you
+don't have downloads it from the game's players into `custom_maps`, with the
+resource maps it needs (`network.map_download = false` turns that off), and a
+game you host on one is shared with the players who lack it
+(`network.map_share`). Download only from players you trust. A map larger
+than the stock ones takes more memory, which the handheld shares with
+EmulationStation.
 
 ## Changing settings
 
@@ -357,6 +483,26 @@ effect, is in [Configuration](CONFIGURATION.md). To go back to the
 launcher's values, delete `config.toml`; the next launch writes it again.
 
 ## Updating
+
+From v2026.10.15 on, the launcher looks for a new release when you start
+Halo, once in six hours at most (a few seconds, and not at all without a
+network). When there is one, it says so on the screen before the game
+starts:
+
+- START downloads the new release's zip for your install (the Knulli zip,
+  or the PortMaster zip with PortMaster) from this repository's releases,
+  checks it against the SHA-256 GitHub gives for it, puts its files in
+  place of the old ones and starts the new version. `maps/`, `save/`,
+  `custom_maps/` and `config.toml` are kept. A download that fails or
+  doesn't match changes nothing.
+- Any other button, or 30 seconds, plays the version you have. That
+  release isn't offered again; the next one is.
+
+SETTINGS > NETWORK SETUP > CHECK FOR UPDATES turns the check off
+(`update.auto`). An install built from source has no `VERSION` file and is
+never offered one.
+
+By hand, and from a version before v2026.10.15:
 
 1. Unzip the new release's zip ([latest release](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/releases/latest)) over the old
    files, replacing them; or, from a build, copy the files as in

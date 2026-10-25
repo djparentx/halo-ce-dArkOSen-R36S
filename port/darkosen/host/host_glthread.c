@@ -1704,7 +1704,7 @@ void glthread_reserved_names(int kind, GLsizei n, GLuint *names)
 
 void host_gl_get_string(uint32_t name, int index, char *buffer, uint32_t size);
 int host_gl_has_extension(const char *name);
-uint32_t host_gl_read_buffer_word(uint32_t buffer, uint32_t offset);
+void host_gl_read_buffer(uint32_t buffer, uint32_t offset, uint32_t size, void *data);
 void host_gl_buffer_write(uint32_t target, uint32_t offset, uint32_t size, const void *data);
 void host_gl_buffer_persistent(uint32_t target, uint32_t size);
 void host_gl_buffer_write_to(uint32_t buffer, uint32_t target, uint32_t offset, uint32_t size, const void *data);
@@ -2401,19 +2401,24 @@ struct word_call
 	uint32_t result;
 };
 
-static void run_read_buffer_word(void *context)
+struct read_buffer_call
 {
-	struct word_call *call = context;
+	uint32_t buffer, offset, size;
+	void *data;
+};
 
-	call->result = host_gl_read_buffer_word(call->a, call->b);
+static void run_read_buffer(void *context)
+{
+	struct read_buffer_call *call = context;
+
+	host_gl_read_buffer(call->buffer, call->offset, call->size, call->data);
 }
 
-static uint32_t synced_gl_read_buffer_word(uint32_t buffer, uint32_t offset)
+static void synced_gl_read_buffer(uint32_t buffer, uint32_t offset, uint32_t size, void *data)
 {
-	struct word_call call = { buffer, offset, 0, 0 };
+	struct read_buffer_call call = { buffer, offset, size, data };
 
-	glthread_sync(run_read_buffer_word, &call);
-	return call.result;
+	glthread_sync(run_read_buffer, &call);
 }
 
 static void run_create_context(void *context)
@@ -2799,7 +2804,7 @@ void *host_import_wrap(const char *name, void *function)
 	{
 		{ "host_gl_get_string", (void *)synced_gl_get_string },
 		{ "host_gl_has_extension", (void *)synced_gl_has_extension },
-		{ "host_gl_read_buffer_word", (void *)synced_gl_read_buffer_word },
+		{ "host_gl_read_buffer", (void *)synced_gl_read_buffer },
 		{ "host_gl_buffer_write", (void *)queued_gl_buffer_write },
 		{ "host_gl_buffer_persistent", (void *)queued_gl_buffer_persistent },
 		{ "host_gl_program_build", (void *)queued_gl_program_build },

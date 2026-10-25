@@ -3,9 +3,9 @@
 Yes — Halo CE runs natively on the Anbernic RG35XX H (RG35XXH) under Knulli:
 60 fps in the menus and about 40 to 55 fps in campaign levels at the default
 render scale, and it plays online (co-op and multiplayer, with PCs and other
-handhelds). This repository is a native ARM64 (AArch64) port of the Halo:
-Combat Evolved decompilation, [halo-ce-universal](https://github.com/cybersecurity/halo-ce-universal),
-to the Allwinner H700 and its Mali-G31 GPU. There is no emulation: no xemu,
+handhelds) and offline against bots. This repository is a native ARM64 (AArch64) port of the Halo:
+Combat Evolved decompilation, [OpenCE](https://github.com/OpenCommunityEdition/OpenCE)
+(formerly halo-ce-universal), to the Allwinner H700 and its Mali-G31 GPU. There is no emulation: no xemu,
 no Box64, no Wine. You need your own copy of the original Xbox game. This
 repository has the source code, the documentation, and ready-made
 [releases](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/releases/latest) that need only your disc image: they hold no game
@@ -39,11 +39,48 @@ data.
 
 Captured on an Anbernic RG35XX H (640x480 screen).
 
-| Main menu | The Silent Cartographer (b30), render scale 0.75 |
+### Bot Match: Slayer against bots, offline
+
+MULTIPLAYER > BOT MATCH sets how many bots join (1 to 15), how well they
+play (Easy to Legendary) and, in Team Slayer, whose side they are on. Then
+you pick the map and the game type, as in the Xbox's split screen, and play
+them on the handheld, with no network
+([Install: Bot Match](docs/INSTALL.md#bot-match)).
+
+| BOT MATCH, under Create Game | The bots' settings |
 | --- | --- |
-| ![Halo: Combat Evolved main menu running natively on an Anbernic RG35XX H under Knulli](docs/screenshots/main-menu.png) | ![Halo CE beach battle on The Silent Cartographer running on an Anbernic RG35XX H at 36 fps](docs/screenshots/b30-beach.png) |
-| **Server browser: public internet games** | **Online on Blood Gulch, a 23-player public game** |
+| ![The Halo CE Multiplayer menu on an Anbernic RG35XX H with the new BOT MATCH item](docs/screenshots/multiplayer-bot-match.png) | ![Halo CE Bot Match settings on an Anbernic RG35XX H: seven bots, skill and teams](docs/screenshots/bot-match-settings.png) |
+| **The lobby: you and seven bots on Blood Gulch** | **Two of the bots at the red base** |
+| ![Halo CE split screen lobby on an Anbernic RG35XX H with one player and seven bots, eight players on Blood Gulch](docs/screenshots/bot-match-lobby.png) | ![Halo CE Slayer against bots on Blood Gulch on an Anbernic RG35XX H: two bots at the red base](docs/screenshots/bot-match.png) |
+
+### The spawn menu
+
+Hold SELECT and press D-pad Down in a game: the level's vehicles, weapons,
+equipment and characters, placed in front of you, a character on your side
+or against you, and a page of the game's cheats
+([Install: the spawn menu](docs/INSTALL.md#the-spawn-menu)).
+
+| The Silent Cartographer (b30): the vehicles page | A Pelican it spawned on the beach |
+| --- | --- |
+| ![The Halo CE spawn menu on an Anbernic RG35XX H listing The Silent Cartographer's vehicles](docs/screenshots/spawn-menu.png) | ![A Pelican spawned with the Halo CE spawn menu on The Silent Cartographer's beach, on an Anbernic RG35XX H](docs/screenshots/spawn-menu-spawned.png) |
+
+### Updates on the handheld
+
+When a new release is out, the launcher offers it before the game starts.
+START downloads it from this repository's releases, checks it against the
+SHA-256 GitHub gives for it and installs it: your maps, saves and settings
+stay. Any other button plays the version you have, and that release isn't
+offered again ([Install: Updating](docs/INSTALL.md#updating)).
+
+![The Halo CE port's updater on an Anbernic RG35XX H offering a new release before the game starts](docs/screenshots/updater.png)
+
+### Online and the campaign
+
+| Server browser: public internet games | Online on Blood Gulch, a 23-player public game |
+| --- | --- |
 | ![Halo CE server browser on an Anbernic RG35XX H listing public internet games](docs/screenshots/server-browser.png) | ![Halo CE online multiplayer on Blood Gulch, sniper rifle zoomed on an enemy, on an Anbernic RG35XX H at 58 fps](docs/screenshots/blood-gulch-online.png) |
+| **Main menu** | **The Silent Cartographer (b30), render scale 0.75** |
+| ![Halo: Combat Evolved main menu running natively on an Anbernic RG35XX H under Knulli](docs/screenshots/main-menu.png) | ![Halo CE beach battle on The Silent Cartographer running on an Anbernic RG35XX H at 36 fps](docs/screenshots/b30-beach.png) |
 
 ## Features
 
@@ -62,9 +99,31 @@ Captured on an Anbernic RG35XX H (640x480 screen).
 - First launch extracts `maps/` from your Xbox disc image on the handheld.
 - The handheld's own controls, read from EmulationStation's configuration.
 - Quit with the hotkey: hold MENU (or SELECT) and press START.
+- Bot Match (MULTIPLAYER > BOT MATCH): Slayer and Team Slayer against up to
+  15 bots on the handheld, offline, their skill (Easy to Legendary) and
+  teams set in the menu ([Install: Bot Match](docs/INSTALL.md#bot-match)).
+  The bots are BirchWoodGod's, from the PS Vita port, contributed to
+  upstream.
+- Updates from the handheld: the launcher offers a new release before the
+  game starts, and START installs it
+  ([Install: Updating](docs/INSTALL.md#updating)).
+- A spawn menu, after [AlphaRing](https://github.com/kirklandsig/AlphaRing)'s: the map's vehicles, weapons,
+  equipment and AI characters, placed in front of you, and the game's cheats
+  (god mode, infinite ammo, one-hit kills and more), and Teleport everyone
+  to me, which brings every other player beside you (for a big online game
+  where someone is stuck). In single player and for the host of a co-op or
+  multiplayer game, never for a player who joined: hold SELECT and press
+  D-pad Down
+  ([Install: the spawn menu](docs/INSTALL.md#the-spawn-menu)).
 - Upstream's online play: the campaign in co-op and multiplayer, over the
   internet (a server browser of public games) or the local network, with
   the PC version's menus ([Install: playing online](docs/INSTALL.md#playing-online)).
+  Network version 38, with OpenCE's own gametypes: SWAT, Infection, Gun
+  Game and Hardcore, in Select Gametype's OPENCE bank.
+- Upstream's Halo Custom Edition maps, beside the Xbox game's: the
+  community's multiplayer and campaign maps in `halo/custom_maps/`. Joining
+  a game on one you don't have downloads it from the game's players
+  ([Install: Custom Edition maps](docs/INSTALL.md#custom-edition-maps)).
 
 ## Performance
 
@@ -102,19 +161,21 @@ optimisations and the measurements behind them are in
 ## Supported devices
 
 The port is made for the Allwinner H700 (4x Cortex-A53 at 1.5 GHz, Mali-G31 MP2,
-1 GB RAM), with Knulli or another firmware that has PortMaster.
+1 GB RAM), with Knulli or another firmware that has PortMaster. Halo moves and
+aims with two analog sticks; on a handheld with one or none, the D-pad
+takes the missing stick's place ([Install: controls](docs/INSTALL.md#controls)).
 
 | Device | Screen | Status |
 | --- | --- | --- |
 | Anbernic RG35XX H | 640x480 | Tested |
-| Anbernic RG35XX Plus | 640x480 | Untested, expected to work |
-| Anbernic RG35XX SP | 640x480 | Untested, expected to work |
-| Anbernic RG35XX 2024 | 640x480 | Untested, expected to work |
+| Anbernic RG35XX Plus | 640x480 | No analog sticks: from v2026.10.21 the D-pad walks, turns and aims; not yet tried on one ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
+| Anbernic RG35XX SP | 640x480 | No analog sticks: from v2026.10.21 the D-pad walks, turns and aims; not yet tried on one ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
+| Anbernic RG35XX 2024 | 640x480 | No analog sticks: from v2026.10.21 the D-pad walks, turns and aims; not yet tried on one ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
 | Anbernic RG40XX H | 640x480 | Untested, expected to work |
-| Anbernic RG40XX V | 640x480 | Untested, expected to work |
+| Anbernic RG40XX V | 640x480 | Untested. One analog stick: it moves, and from v2026.10.21 the D-pad aims |
 | Anbernic RG CubeXX | 720x720 | Untested |
 | Anbernic RG34XX SP | 720x480 | Works, reported by a user ([#1](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/1)) |
-| Anbernic RG34XX | 720x480 | Untested, expected to work |
+| Anbernic RG34XX | 720x480 | No analog sticks: from v2026.10.21 the D-pad walks, turns and aims; not yet tried on one ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
 | Anbernic RG353M (RK3566, Mali-G52) | 640x480 | Works on ROCKNIX, reported by a user ([#5](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/5)) |
 | R36S (RK3326, Mali-G31) | 640x480 | Works on dArkOSen from v2026.10.07, reported by a user ([#4](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/4)) |
 
@@ -163,13 +224,22 @@ game's own first start then takes about a minute more with a black screen
 while it sets up its cache (the screen says so first); later starts take
 seconds. Instead of a disc image you can also copy an extracted Xbox `maps/`
 folder into `halo/`. To quit, hold the hotkey (MENU, or SELECT) and press
-START. To update, unzip a newer release over the old files: `maps/`,
-`save/` and `config.toml` stay.
+START. New releases are offered by the launcher before the game starts
+(START installs one); a newer release unzipped over the old files works
+too: `maps/`, `save/` and `config.toml` stay.
 
 With PortMaster (on Knulli or another firmware) instead: put
 `halo-ce-portmaster-<version>.zip` in PortMaster's `autoinstall` folder and
 start PortMaster, then copy the disc image into `ports/halo/`
 ([Install](docs/INSTALL.md#installing-with-portmaster)).
+
+On a Batocera PC (x86-64) instead: unzip
+`halo-ce-batocera-pc-<version>.zip` into `/userdata` (over the network,
+`\\BATOCERA\share`), put the disc image, or the Xbox game's `maps/` folder,
+in `roms/ports/halo-pc/`, and start Halo CE (PC build) from Ports. It is the
+decompilation's own 32-bit Linux build with this port's additions (Bot
+Match, the spawn menu), and it installs each new release by itself before
+it starts ([Batocera PCs](port/knulli/README.md#batocera-pcs)).
 
 The resulting layout:
 
@@ -182,7 +252,9 @@ The resulting layout:
     ├── halo_extract.py
     ├── halo_screen.py
     ├── sdl_mapping.py
+    ├── halo_update.py   the updater the launcher runs
     ├── config.default.toml
+    ├── VERSION          the release installed
     ├── brokers.txt      internet play's signalling brokers
     ├── config.toml      written at the first launch
     ├── log.txt          the log of the last launch
@@ -311,11 +383,13 @@ launcher's defaults for the handheld:
 | `display.fast_shaders` | `true` | Colours and combiner arithmetic in half precision (fp16). |
 | `display.fast_textures` | `true` | DXT1 and 16-bit Xbox textures sent to the GPU as 16-bit texels. |
 | `display.screen_width` | `0` | The columns of the 480-line picture: 0 for the screen's shape (640 on 4:3 screens, 720 on 3:2), 640 for the Xbox's 4:3. |
+| `input.dpad_controls` | `"auto"` | On a handheld without a right stick, the D-pad aims or walks and turns ([Install: controls](docs/INSTALL.md#controls)); `"off"` keeps the game's own D-pad. |
 | `display.interpolation` | `true` | Draws a frame for every display refresh, blending between the game's 30 ticks a second; `false` keeps 30 fps. |
 | `display.frame_pacing` | `true` | Shows each frame at the display refresh it was drawn for, so that most frames show the world as it is when they are seen. |
 | `display.vsync` | `true` | Waits for the display between frames. |
-| `update.auto` | `false` | The upstream updater, which fetches upstream's builds rather than this port's; off. |
+| `update.auto` | `true` | The launcher's updater: a new release of this port is offered before the game starts (SETTINGS > NETWORK SETUP > CHECK FOR UPDATES). |
 | `network.online` | `true` | Internet play: the server browser, hosting and joining. It connects only while you use them. |
+| `bots.count` | `7` | How many bots join a Bot Match, with `bots.skill` and `bots.teams`; BOT MATCH's screen sets them. |
 
 Environment variables such as `HALO_RENDER_SCALE=0.6` override a setting for
 one run. Every setting is described in
@@ -361,17 +435,18 @@ the halo-ce-universal decompilation; you supply the Xbox game's data.
 
 ### What frame rate does Halo CE get on the RG35XX H?
 
-At the default render scale of 0.75: 60 fps in the menus, about 40 fps on
-343 Guilty Spark (c10, 31 to 44), about 40 fps in the beach battle of The
-Silent Cartographer (b30), and about 55 fps at the opening of Halo (a30).
-At the full 640x480 it is about 24 to 40 fps. The numbers are improving;
-see the [performance table](#performance).
+At the default render scale of 0.75: 60 fps in the menus, about 57 fps on
+343 Guilty Spark (c10), about 43 in the beach battle of The Silent
+Cartographer (b30) and about 59 at the opening of Halo (a30). At the full
+640x480 it is about 38 to 56 fps. The ranges are in the
+[performance table](#performance).
 
 ### Does it work with the Xbox version or the PC version of Halo?
 
 The Xbox version. The decompilation is of the Xbox build, and it reads the
 Xbox maps. The PC version (Gearbox's port) has different map files that this
-code cannot load. Use a disc image of the original Xbox game.
+code cannot load. Use a disc image of the original Xbox game. Halo Custom
+Edition's maps run beside it ([Install: Custom Edition maps](docs/INSTALL.md#custom-edition-maps)).
 
 ### Is this legal?
 
@@ -422,12 +497,23 @@ native port of the decompiled code avoids the emulation entirely.
 
 ### Which other handhelds does it work on?
 
-It should work on the other Allwinner H700 handhelds that run Knulli: the
+It should run on the other Allwinner H700 handhelds that run Knulli: the
 Anbernic RG35XX Plus, SP and 2024, RG40XX H and V, RG CubeXX and RG34XX.
-The RG35XX H is the one it is developed on, and a user reported the RG34XX
+Halo moves and aims with two analog sticks. The Plus, SP, 2024 and RG34XX
+have none and the RG40XX V one: from v2026.10.21 the D-pad takes their
+place, not yet tried on those handhelds ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)). The RG35XX H is the one it is developed on, and a user reported the RG34XX
 SP working, its 3:2 screen filled with `screen_width = 0`
 ([#1](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/1)). TrimUI handhelds and other SoCs are not
 supported.
+
+### Can I play against bots?
+
+Yes, offline: MULTIPLAYER > BOT MATCH plays Slayer or Team Slayer against
+up to 15 computer players on the handheld alone, at Easy, Normal, Heroic or
+Legendary ([Install: Bot Match](docs/INSTALL.md#bot-match)). The bots are
+BirchWoodGod's, from the PS Vita port, contributed to upstream OpenCE (in
+review there). They play in Bot Match only: not online, not on a LAN, and
+not in other game types.
 
 ## Legal notice
 
@@ -448,6 +534,12 @@ original Xbox game. Details: [docs/LEGAL.md](docs/LEGAL.md).
   ports, on which this port is built. It starts from
   [bnunu/halo-1](https://github.com/bnunu/halo-1), a fork of
   [punpckhdq/halo](https://github.com/punpckhdq/halo).
+- [BirchWoodGod](https://github.com/BirchWoodGod): the bots, from the
+  [PS Vita port](https://github.com/BirchWoodGod/halo-ce-vita),
+  contributed to upstream under CC0
+  ([OpenCE #367](https://github.com/OpenCommunityEdition/OpenCE/pull/367)).
+- [AlphaRing](https://github.com/kirklandsig/AlphaRing): the spawn menu's
+  design, after its menu for The Master Chief Collection.
 - Bungie, who made Halo: Combat Evolved. Halo is a trademark of Microsoft
   Corporation.
 - [SDL](https://www.libsdl.org/) (zlib licence): the headers are used at build

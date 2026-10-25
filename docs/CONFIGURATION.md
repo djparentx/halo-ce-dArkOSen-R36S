@@ -18,6 +18,8 @@ variables at the end are for measuring and developing the port
 - [Renderer switches](#renderer-switches)
 - [Sound and language](#sound-and-language)
 - [Network and updates](#network-and-updates)
+- [Controls](#controls)
+- [Bots](#bots)
 - [Diagnostics](#diagnostics)
 - [Environment variables outside config.toml](#environment-variables-outside-configtoml)
 - [Settings the handheld build ignores](#settings-the-handheld-build-ignores)
@@ -120,8 +122,12 @@ launcher writes another value, the table says so.
 | [`audio.enabled`](#sound-and-language) | boolean | `true` | | `HALO_NO_AUDIO` (set is false) |
 | [`audio.volume`](#sound-and-language) | real | `1.0` | | `HALO_VOLUME` (value) |
 | [`game.language`](#sound-and-language) | string | `""` | | `HALO_LANGUAGE` (value) |
-| [`network.online`](#network-and-updates) | boolean | `true` | `false` | `HALO_NET_ONLINE` (value) |
-| [`update.auto`](#network-and-updates) | boolean | `true` | `false` | `HALO_UPDATE_AUTO` (value) |
+| [`network.online`](#network-and-updates) | boolean | `true` | `true` | `HALO_NET_ONLINE` (value) |
+| [`update.auto`](#network-and-updates) | boolean | `true` | `true` | (the launcher reads the file) |
+| [`input.dpad_controls`](#controls) | string | `"auto"` | | `HALO_DPAD_CONTROLS` (value) |
+| [`bots.count`](#bots) | integer | `7` | | `HALO_BOTS` (value) |
+| [`bots.skill`](#bots) | string | `"normal"` | | `HALO_BOT_SKILL` (value) |
+| [`bots.teams`](#bots) | string | `"even"` | | `HALO_BOT_TEAMS` (value) |
 | [`network.*`, others](#network-and-updates) | | | | |
 | [`debug.*`, upstream's](#diagnostics) | | | | |
 
@@ -243,8 +249,9 @@ texture memory on a 1 GB device. Keep it on.
 
 The number of columns of the 480-line picture: 640 for the Xbox's 4:3, or
 0 for the display's shape. For 0, the host computes the width from the
-framebuffer's first mode (`/sys/class/graphics/fb0/modes`) as 480 times the
-longer side over the shorter one, and passes it as `HALO_DISPLAY_WIDTH`; on
+mode the framebuffer shows (`FBIOGET_VSCREENINFO` on `/dev/fb0`; its first
+listed mode, `/sys/class/graphics/fb0/modes`, if that fails) as 480 times
+the longer side over the shorter one (the log says which size it read), and passes it as `HALO_DISPLAY_WIDTH`; on
 a 640x480 screen that is 640. With a wider picture the 3D view widens (the
 camera keeps its vertical field of view), and the menus stay 640 columns
 wide in the centre. The picture is centred on the screen.
@@ -559,14 +566,18 @@ every shader with `debug.gpu_dump_shaders`.
 | `audio.enabled` | boolean | `true` | `HALO_NO_AUDIO` (set is false) | Play sound. |
 | `audio.volume` | real | `1.0` | `HALO_VOLUME` | The volume of everything, 0.0 to 1.0. The handheld's own volume control applies on top. |
 | `game.language` | string | `""` | `HALO_LANGUAGE` | The language the game asks the Xbox for: `"ja"`, `"de"`, `"fr"`, `"es"` or `"it"`; empty for English. The game data decides what is translated. |
+| `audio.voice_chat` | string | `"push_to_talk"` | `HALO_VOICE_CHAT` | Upstream's voice chat. The handhelds have no microphone: the host refuses one, and nothing is sent. |
+| `audio.voice_volume` | real | `1.0` | `HALO_VOICE_VOLUME` | The volume of other players' voices. |
 
 The host opens SDL2's audio device with a buffer of 1024 sample frames;
 `HALO_AUDIO_SAMPLES` changes it ([below](#environment-variables-outside-configtoml)).
 
 ## Network and updates
 
-The launcher turns off upstream's updater and leaves internet play on, as
-upstream has it (updating from a version before co-op turns it on once). The
+`update.auto` is the launcher's updater's (upstream's own is not in the
+handheld build), and internet play is on, as upstream has it. Updating
+from a version before co-op turns internet play on once, and from one
+before v2026.10.15 the updater. The
 network settings are upstream's; the PC menus' Server Setup and Settings
 write several of them. [Install: playing online](INSTALL.md#playing-online)
 describes playing.
@@ -574,7 +585,7 @@ describes playing.
 | Setting | Type | Default | Launcher | Variable | Effect |
 | --- | --- | --- | --- | --- | --- |
 | `network.online` | boolean | `true` | `true` | `HALO_NET_ONLINE` | Internet play: hosting makes an invite link and, if public, a server browser listing; off keeps system link to the local network. Connects only while hosting, joining or browsing. |
-| `update.auto` | boolean | `true` | `false` | `HALO_UPDATE_AUTO` | Upstream's updater, which looks for a new version of upstream's builds, not of this port. Keep it off. |
+| `update.auto` | boolean | `true` | `true` | | The launcher's updater (`halo_update.py`): before the game starts, a newer release of this port is offered, and START installs it ([Install: Updating](INSTALL.md#updating)). `false` never looks. SETTINGS > NETWORK SETUP > CHECK FOR UPDATES. |
 | `network.public_lobby` | boolean | `true` | | `HALO_NET_PUBLIC_LOBBY` | The server browser: list this machine's public games and show others'. |
 | `network.host_public` | boolean | `true` | | `HALO_NET_HOST_PUBLIC` | Whether a new internet multiplayer game starts PUBLIC. |
 | `network.coop_public` | boolean | `false` | | `HALO_NET_COOP_PUBLIC` | Whether a new online co-op game starts PUBLIC. |
@@ -588,6 +599,29 @@ describes playing.
 | `network.allow_upnp` | boolean | `true` | | `HALO_NET_ALLOW_UPNP` | Let internet play ask the router to forward its port. |
 | `network.brokers_file` | string | `"brokers.txt"` | | `HALO_NET_BROKERS_FILE` | The public MQTT brokers through which the machines of a game find each other, beside `config.toml`. |
 | `network.stun_servers` | string | two public STUN servers | | `HALO_NET_STUN` | Servers that tell the machine its internet address. |
+| `game.custom_edition` | boolean | `true` | | `HALO_CUSTOM_EDITION` | Load and run Halo Custom Edition maps from `custom_maps/` ([Install: Custom Edition maps](INSTALL.md#custom-edition-maps)); `false` refuses them. |
+| `network.map_download` | boolean | `true` | | `HALO_NET_MAP_DOWNLOAD` | Joining a game on a Custom Edition map this machine lacks: download it, and the resource maps it needs, from the game's players. |
+| `network.map_share` | boolean | `true` | | `HALO_NET_MAP_SHARE` | Hosting: send the game's Custom Edition map to players who lack it. |
+| `network.map_seed` | boolean | `true` | | `HALO_NET_MAP_SEED` | Playing in another's game: send its map on to other players who are downloading it. |
+
+## Controls
+
+| Setting | Type | Default | Variable | Effect |
+| --- | --- | --- | --- | --- |
+| `input.dpad_controls` | string | `"auto"` | `HALO_DPAD_CONTROLS` | The D-pad in a game, for a controller without a right stick ([Install: controls](INSTALL.md#controls)). `"auto"` goes by the controller's sticks, as SDL reports them: with a left stick alone the D-pad aims; without sticks Up and Down walk and Left and Right turn, and with L1 held Up and Down look and Left and Right strafe, A crouches and B zooms (L1 pressed and let go alone is the flashlight). `"on"`: the controls without sticks on any controller. `"off"`: the game's own D-pad (walking and strafing). Never in the menus, the spawn menu or with SELECT held. `port/linux/src/dpad_controls.c`. |
+
+## Bots
+
+The bots of a Bot Match (MULTIPLAYER > BOT MATCH, whose screen writes
+these: [Install: Bot Match](INSTALL.md#bot-match)). They join only a game
+of this machine alone, in Slayer or Team Slayer.
+
+| Setting | Type | Default | Variable | Effect |
+| --- | --- | --- | --- | --- |
+| `bots.count` | integer | `7` | `HALO_BOTS` | How many join the lobby, 0 to 15, as far as the game has room. |
+| `bots.skill` | string | `"normal"` | `HALO_BOT_SKILL` | `"easy"`, `"normal"`, `"heroic"` or `"legendary"`: how soon they react, how well they aim, how far they see. |
+| `bots.teams` | string | `"even"` | `HALO_BOT_TEAMS` | In team games: `"even"` puts bots on both teams, evening them with the players; `"against"` puts them all on the team the players are not on. |
+| `debug.bot_trace` | integer | `0` | `HALO_BOT_TRACE` | Each bot's state in the log every this many seconds: where it is and goes, its path, target and weapon; 0 never. |
 
 ## Diagnostics
 
@@ -645,7 +679,7 @@ These are read directly by the host (`port/knulli/host/`,
 | `HALO_DATA_ROOT` | `host_main.c` | the executable's folder | The folder with `maps/` and `config.toml`. |
 | `HALO_SAVE_ROOT` | `host_main.c` | `save/` in the data folder | The saved games and the shader cache. |
 | `HALO_GUEST_IMAGE` | `host_main.c` | `halo_guest.elf` beside the executable | The guest image to load. |
-| `HALO_DISPLAY_WIDTH` | `host_main.c` | from the framebuffer's mode | The width `display.screen_width = 0` uses. |
+| `HALO_DISPLAY_WIDTH` | `host_main.c` | from the mode the framebuffer shows | The width `display.screen_width = 0` uses. |
 | `SDL_GAMECONTROLLERCONFIG` | SDL2 | set by `Halo.sh` | The controller mapping from `sdl_mapping.py`. |
 | `HALO_FB_BUFFERS=<n>` | `tools/device/run.sh` | `2` | The number of framebuffers for a benchmark run (`fbset -vyres`). |
 
