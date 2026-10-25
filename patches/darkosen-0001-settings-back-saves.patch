@@ -43,6 +43,21 @@ index a359068..522ac68 100644
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mouse_settings/header_profile_mouse_settings"/>
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mouse_settings/options_menu"/>
  	</widget>
+diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.map_sharing.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.map_sharing.xml
+index e0f7466..57ea685 100644
+--- a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.map_sharing.xml
++++ b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.map_sharing.xml
+@@ -2,8 +2,8 @@
+ <!-- The port's settings screen, in the PC version's style (tools/port_settings.py) -->
+ <menus>
+ 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/network_setup/map_sharing/map_sharing_settings_screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game" bitmap="bitmaps/gradient">
+-		<on event="b" back="true"/>
+-		<on event="back" back="true"/>
++		<on event="b" run="port settings save" back="true"/>
++		<on event="back" run="port settings save" back="true"/>
+ 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/network_setup/map_sharing/header_profile_network_settings"/>
+ 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/network_setup/map_sharing/options_menu"/>
+ 	</widget>
 diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.xml
 index 0823fd3..d9c54af 100644
 --- a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.network_setup.xml
@@ -57,6 +72,36 @@ index 0823fd3..d9c54af 100644
 +		<on event="back" run="port settings save" back="true"/>
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/network_setup/header_profile_network_settings"/>
  		<child widget="main_menu/settings_select/player_setup/player_profile_edit/network_setup/options_menu"/>
+ 	</widget>
+diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.fov_viewmodels.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.fov_viewmodels.xml
+index b44a91a..e312739 100644
+--- a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.fov_viewmodels.xml
++++ b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.fov_viewmodels.xml
+@@ -2,8 +2,8 @@
+ <!-- The port's settings screen, in the PC version's style (tools/port_settings.py) -->
+ <menus>
+ 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/fov_viewmodels/fov_viewmodel_settings_screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game" bitmap="bitmaps/gradient">
+-		<on event="b" back="true"/>
+-		<on event="back" back="true"/>
++		<on event="b" run="port settings save" back="true"/>
++		<on event="back" run="port settings save" back="true"/>
+ 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/fov_viewmodels/header_profile_video_settings"/>
+ 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/fov_viewmodels/options_menu"/>
+ 	</widget>
+diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.graphics.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.graphics.xml
+index 5e76b82..2110bd4 100644
+--- a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.graphics.xml
++++ b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.graphics.xml
+@@ -2,8 +2,8 @@
+ <!-- The port's settings screen, in the PC version's style (tools/port_settings.py) -->
+ <menus>
+ 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/graphics_settings_screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game" bitmap="bitmaps/gradient">
+-		<on event="b" back="true"/>
+-		<on event="back" back="true"/>
++		<on event="b" run="port settings save" back="true"/>
++		<on event="back" run="port settings save" back="true"/>
+ 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/header_profile_video_settings"/>
+ 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/options_menu"/>
  	</widget>
 diff --git a/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.xml b/port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.xml
 index e30060b..406cd34 100644
