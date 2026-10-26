@@ -118,8 +118,9 @@ offered again ([Install: Updating](docs/INSTALL.md#updating)).
 - Upstream's online play: the campaign in co-op and multiplayer, over the
   internet (a server browser of public games) or the local network, with
   the PC version's menus ([Install: playing online](docs/INSTALL.md#playing-online)).
-  Network version 38, with OpenCE's own gametypes: SWAT, Infection, Gun
-  Game and Hardcore, in Select Gametype's OPENCE bank.
+  Network version 39, with OpenCE's own gametypes: SWAT, Infection, Gun
+  Game and Hardcore, in Select Gametype's OPENCE bank, and upstream's
+  dedicated servers, which it joins as any other host.
 - Upstream's Halo Custom Edition maps, beside the Xbox game's: the
   community's multiplayer and campaign maps in `halo/custom_maps/`. Joining
   a game on one you don't have downloads it from the game's players
@@ -173,7 +174,7 @@ takes the missing stick's place ([Install: controls](docs/INSTALL.md#controls)).
 | Anbernic RG35XX 2024 | 640x480 | No analog sticks: from v2026.10.21 the D-pad walks, turns and aims; not yet tried on one ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
 | Anbernic RG40XX H | 640x480 | Untested, expected to work |
 | Anbernic RG40XX V | 640x480 | Untested. One analog stick: it moves, and from v2026.10.21 the D-pad aims |
-| Anbernic RG CubeXX | 720x720 | Untested |
+| Anbernic RG CubeXX | 720x720 | Tested on Knulli Scarab, online co-op included. The 4:3 picture has bars above and below, black from v2026.10.26 |
 | Anbernic RG34XX SP | 720x480 | Works, reported by a user ([#1](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/1)) |
 | Anbernic RG34XX | 720x480 | No analog sticks: from v2026.10.21 the D-pad walks, turns and aims; not yet tried on one ([#9](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/9)) |
 | Anbernic RG353M (RK3566, Mali-G52) | 640x480 | Works on ROCKNIX, reported by a user ([#5](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/5)) |
@@ -183,6 +184,7 @@ takes the missing stick's place ([Install: controls](docs/INSTALL.md#controls)).
 | --- | --- | --- |
 | Knulli (Gladiator II) | the Knulli zip | Tested |
 | Knulli (Gladiator II) | the PortMaster zip | Tested |
+| Knulli (Scarab) | the Knulli zip | Tested (RG CubeXX) |
 | muOS (2601 Jacaranda) | the PortMaster zip | Tested from v2026.10.07 (RG35XX H, offline and online). Earlier releases crashed there in menus, at respawn and in the pause menu |
 | ArkOS and others with PortMaster | the PortMaster zip | Untested. The host needs glibc 2.30 or newer and SDL2 2.0.18 or newer |
 | ROCKNIX | the PortMaster zip | Reported working by a user on an RG353M with Arm's Mali driver, with the default settings once ROCKNIX was up to date. On their older ROCKNIX (20260601) parts of the picture stopped updating unless `debug.instance_models = false` ([#5](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/5)). ROCKNIX can also use the open Panfrost driver, which the port has not been tried with |

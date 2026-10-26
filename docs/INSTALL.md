@@ -67,7 +67,7 @@ The port is made for the Allwinner H700 (4x Cortex-A53 at 1.5 GHz, Mali-G31 MP2,
 | Anbernic RG35XX 2024 | 640x480 | Untested, expected to work |
 | Anbernic RG40XX H | 640x480 | Untested, expected to work |
 | Anbernic RG40XX V | 640x480 | Untested, expected to work |
-| Anbernic RG CubeXX | 720x720 | Untested |
+| Anbernic RG CubeXX | 720x720 | Tested on Knulli Scarab, online co-op included. The 4:3 picture has bars above and below, black from v2026.10.26 |
 | Anbernic RG34XX | 720x480 | Untested |
 | Anbernic RG353M (RK3566, Mali-G52) | 640x480 | Works on ROCKNIX, reported by a user ([#5](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/5)) |
 | R36S (RK3326, Mali-G31) | 640x480 | Works on dArkOSen from v2026.10.07, reported by a user ([#4](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/4)) |
@@ -76,6 +76,7 @@ The port is made for the Allwinner H700 (4x Cortex-A53 at 1.5 GHz, Mali-G31 MP2,
 | --- | --- | --- |
 | Knulli (Gladiator II) | the Knulli zip | Tested |
 | Knulli (Gladiator II) | the PortMaster zip | Tested |
+| Knulli (Scarab) | the Knulli zip | Tested (RG CubeXX) |
 | muOS (2601 Jacaranda) | the PortMaster zip | Tested from v2026.10.07 (RG35XX H, offline and online). Earlier releases crashed there in menus, at respawn and in the pause menu |
 | ArkOS and others with PortMaster | the PortMaster zip | Untested. The host needs glibc 2.30 or newer and SDL2 2.0.18 or newer |
 | ROCKNIX | the PortMaster zip | Reported working by a user on an RG353M with Arm's Mali driver, with the default settings once ROCKNIX was up to date. On their older ROCKNIX (20260601) parts of the picture stopped updating unless `debug.instance_models = false` ([#5](https://github.com/kirklandsig/halo-ce-anbernic-rg35xx/issues/5)). ROCKNIX can also use the open Panfrost driver, which the port has not been tried with |
@@ -415,8 +416,8 @@ Updating from a version before co-op turns it on once; after that your
 choice is kept.
 
 Every machine in a game has to run the same network version, and the
-server browser lists only games of its own. From v2026.10.23 the handheld
-plays version 38, upstream's from 2026-10-24, with the PC and Android
+server browser lists only games of its own. From v2026.10.26 the handheld
+plays version 39, upstream's from 2026-10-25, with the PC and Android
 builds of that day on, and with people playing OpenCE's web build in
 a browser: a browser connects over WebRTC, which the handheld answers (DTLS,
 with Mbed TLS). When upstream raises the version again, the handheld needs a
@@ -424,7 +425,11 @@ new release to see their games. Version 38 brings OpenCE's gametypes
 (SWAT, Infection, Gun Game and Hardcore: Select Gametype's OPENCE bank,
 and OPENCE OPTIONS in Edit Gametypes), co-op's ALLY FRIENDLY FIRE, and
 the host's SHIELD EFFECTS in Player Options; upstream's text chat is left
-out (its messages are dropped). A game on a Custom Edition map can be
+out (its messages are dropped). Version 39 is upstream's dedicated servers
+(a host with no player of its own, `halo --server` on a PC): the handheld
+joins one as any other game, and the server browser shows those the
+internet brokers list among the others. Those listed only on upstream's
+master server don't show; an invite link to one still joins it. A game on a Custom Edition map can be
 joined: the map comes from the game's players
 ([Custom Edition maps](#custom-edition-maps)).
 

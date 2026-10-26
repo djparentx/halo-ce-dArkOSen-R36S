@@ -74,7 +74,7 @@ native port of the decompiled code avoids the emulation entirely.
 
 It should work on the other Allwinner H700 handhelds that run Knulli: the
 Anbernic RG35XX Plus, SP and 2024, RG40XX H and V, RG CubeXX and RG34XX.
-Only the RG35XX H has been tested. TrimUI handhelds and other SoCs are not
+The RG35XX H and the RG CubeXX have been tested. TrimUI handhelds and other SoCs are not
 supported.
 
 ## Can I play against bots?

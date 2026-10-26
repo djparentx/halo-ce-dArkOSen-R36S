@@ -21,6 +21,7 @@ Android, each request goes to a thread that has one.
 #include "host_knulli.h"
 
 #include <SDL2/SDL.h>
+#include <EGL/egl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,6 +138,11 @@ int host_sdl_init(uint32_t flags)
 			SDL_PATCHLEVEL, video ? video : "none", audio ? audio : "none");
 	}
 	return 1;
+}
+
+const char *host_sdl_video_driver(void)
+{
+	return SDL_GetCurrentVideoDriver();
 }
 
 int host_sdl_set_hint(const char *name, const char *value)
@@ -258,6 +264,16 @@ uint32_t host_sdl_gl_create_context(uint32_t window)
 	{
 		host_logf(HOST_LOG_ERROR, "SDL_GL_CreateContext: %s", SDL_GetError());
 		return 0;
+	}
+	{
+		int width = 0, height = 0;
+		EGLint surface_width = 0, surface_height = 0;
+
+		SDL_GL_GetDrawableSize(object, &width, &height);
+		eglQuerySurface(eglGetCurrentDisplay(), eglGetCurrentSurface(EGL_DRAW), EGL_WIDTH, &surface_width);
+		eglQuerySurface(eglGetCurrentDisplay(), eglGetCurrentSurface(EGL_DRAW), EGL_HEIGHT, &surface_height);
+		host_logf(HOST_LOG_INFO, "GL drawable %dx%d, EGL surface %dx%d", width, height, (int)surface_width,
+			(int)surface_height);
 	}
 	return handle_new(_handle_context, context);
 }
