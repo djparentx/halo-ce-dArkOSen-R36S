@@ -30,6 +30,7 @@ GLIBC=$(folder "${GLIBC_SYSROOT:?the glibc 2.31 sysroot (port/darkosen/glibc_sys
 cd "$(dirname "$0")/../.."
 ROOT=$(folder .)
 CC=${CC:-aarch64-linux-gnu-gcc}
+CXX=${CXX:-aarch64-linux-gnu-g++}
 JOBS=${JOBS:-$(nproc)}
 OUT=build/knulli
 OBJ=$OUT/obj
@@ -60,11 +61,16 @@ INCLUDES="-Iport/darkosen/compat -Iport/darkosen/host -Iport/android/include -Ip
 	-Iport/third_party/tomlc17 -I$OUT/gl_include -I$SDL2_INCLUDE"
 MINIUPNPC="-Iport/third_party/miniupnpc/include -Iport/third_party/miniupnpc/src -DMINIUPNP_STATICLIB
 	-DMINIUPNPC_SET_SOCKET_TIMEOUT -DMINIUPNPC_GET_SRC_ADDR -D_BSD_SOURCE -D_DEFAULT_SOURCE -w"
+# etcpak (host_etc2_encode.cpp): C++ without exceptions or RTTI, which needs
+# nothing from the C++ library but its headers (the cross compiler's own);
+# the glibc check below still covers what it calls
+CXXFLAGS="-O2 -g -mcpu=cortex-a53 -fPIC -fno-exceptions -fno-rtti -w -ffile-prefix-map=$ROOT=.
+	-Iport/darkosen/host -Iport/darkosen/third_party/etcpak"
 
 # the compiler and its options as the objects were made with them: when
 # they change, every object is made again
 FLAGS=$OUT/flags
-printf '%s\n' "$CC $CFLAGS $INCLUDES $MINIUPNPC" > "$FLAGS.new"
+printf '%s\n' "$CC $CFLAGS $INCLUDES $MINIUPNPC $CXX $CXXFLAGS" > "$FLAGS.new"
 cmp -s "$FLAGS.new" "$FLAGS" || mv "$FLAGS.new" "$FLAGS"
 rm -f "$FLAGS.new"
 
@@ -93,7 +99,17 @@ compile() {
 	fi
 	objects="$objects $object"
 }
-
+compile_cxx() {
+	source=$1
+	shift
+	object=$OBJ/$(echo "$source" | tr / _).o
+	if stale "$object"; then
+		echo "CXX $source"
+		# shellcheck disable=SC2086
+		$CXX $CXXFLAGS "$@" -MMD -MF "$object.d" -c "$source" -o "$object"
+	fi
+	objects="$objects $object"
+}
 for source in host_debug host_gl host_loader host_memory host_syscall host_thread host_watch_hash; do
 	compile port/android/host/$source.c
 done
@@ -102,6 +118,12 @@ compile port/darkosen/host/host_sdl2.c
 compile port/darkosen/host/host_profile.c
 compile port/darkosen/host/host_gl_timing.c
 compile port/darkosen/host/host_gl_timing.S
+# DXT textures as ETC2 (host_etc2.c, etcpak)
+compile port/darkosen/host/host_etc2.c
+for source in ProcessRGB Tables Dither; do
+	compile_cxx port/darkosen/third_party/etcpak/$source.cpp
+done
+compile_cxx port/darkosen/host/host_etc2_encode.cpp
 # the GL thread's recording functions, from the functions the guest imports
 python3 port/darkosen/glthread_gen.py build/android/guest/gen/gl_imports.list "$KHRONOS/GLES3/gl32.h" \
 	"$KHRONOS/GLES2/gl2ext.h" \

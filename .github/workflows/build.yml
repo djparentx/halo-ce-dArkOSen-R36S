@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [dArkOSen_R36]
+    branches: [main, dxt-etc2]
     tags: ['v*']
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build git curl xz-utils unzip tar dpkg python3 \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             lsb-release wget gnupg software-properties-common
 
       - name: Install clang 22 (apt.llvm.org)
