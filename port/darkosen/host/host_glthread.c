@@ -2422,6 +2422,8 @@ static void synced_gl_read_buffer(uint32_t buffer, uint32_t offset, uint32_t siz
 	glthread_sync(run_read_buffer, &call);
 }
 
+static void bars_take(void);
+
 static void run_create_context(void *context)
 {
 	struct word_call *call = context;
@@ -2438,6 +2440,7 @@ static void run_create_context(void *context)
 		}
 		share_initialize();
 		scanout_open();
+		bars_take();
 		builders_start();
 	}
 }
@@ -2566,6 +2569,118 @@ static void health_check(uint32_t frame)
 	}
 }
 
+/* ---------- the screen's bars
+
+On a screen taller than 4:3 (the RG CubeXX's square one) the game's 4:3
+picture is letterboxed (d3d8_gl.c's display blit, which draws the picture
+across the window's middle), and Arm's driver on the framebuffer never
+writes the tiles outside what a frame draws: the bars keep whatever the
+screen showed before, EmulationStation's launch screen, and once the game
+has cleared the window the tiles along the picture's edges come out white
+(even in the frames after with no clear). So where the window is the
+framebuffer itself (SDL2's "mali" driver, not rotated, the EGL surface
+fb0's visible size, whole pages of packed pixels) the GL thread takes the
+bars as the context is made, before the game's first frame: it blackens
+them on every page once the first frames are on screen and every 600
+frames after, and the game, asking host_gl_window_band, does not clear the
+window while its picture is exactly the band between them. Anywhere else
+the game clears as before. */
+
+#define BARS_FIRST_FRAME 30
+#define BARS_EVERY_FRAMES 600
+
+static int bars_device = -1;
+static size_t bars_size;
+static uint32_t bars_band;              /* the picture's rows; 0: the game clears */
+
+/* whether fb0 is still the window the bars were taken for */
+static int bars_screen(struct fb_var_screeninfo *screen, struct fb_fix_screeninfo *fixed)
+{
+	EGLint width = 0, height = 0;
+
+	eglQuerySurface(eglGetCurrentDisplay(), eglGetCurrentSurface(EGL_DRAW), EGL_WIDTH, &width);
+	eglQuerySurface(eglGetCurrentDisplay(), eglGetCurrentSurface(EGL_DRAW), EGL_HEIGHT, &height);
+	if (ioctl(bars_device, FBIOGET_VSCREENINFO, screen) || ioctl(bars_device, FBIOGET_FSCREENINFO, fixed))
+		return 0;
+	/* (no bars on a 4:3 screen, or a wider one, which the game fills) */
+	return width > 0 && height > 0 && (int64_t)height * 4 > (int64_t)width * 3 &&
+		screen->xres == (uint32_t)width && screen->yres == (uint32_t)height && !screen->rotate &&
+		!screen->xoffset && screen->yres_virtual % screen->yres == 0 && screen->yoffset % screen->yres == 0 &&
+		fixed->type == FB_TYPE_PACKED_PIXELS && (screen->bits_per_pixel == 16 || screen->bits_per_pixel == 32) &&
+		fixed->line_length >= screen->xres * (screen->bits_per_pixel / 8) &&
+		(uint64_t)fixed->line_length * screen->yres_virtual <= fixed->smem_len;
+}
+
+static void bars_release(void)
+{
+	__atomic_store_n(&bars_band, 0, __ATOMIC_RELEASE);
+	if (bars_device >= 0)
+		close(bars_device);
+	bars_device = -1;
+}
+
+/* as the context is made, before the game's first frame */
+static void bars_take(void)
+{
+	struct fb_var_screeninfo screen;
+	struct fb_fix_screeninfo fixed;
+	const char *video = host_sdl_video_driver();
+	const char *rotation = getenv("SDL_ROTATION");
+
+	/* (a context made again: taken again, for its window) */
+	bars_release();
+	if (!video || strcmp(video, "mali") || (rotation && *rotation && strcmp(rotation, "0")))
+		return;
+	bars_device = open("/dev/fb0", O_RDWR | O_CLOEXEC);
+	if (bars_device < 0 || !bars_screen(&screen, &fixed))
+	{
+		bars_release();
+		return;
+	}
+	bars_size = fixed.smem_len;
+	__atomic_store_n(&bars_band, screen.xres * 3 / 4, __ATOMIC_RELEASE);
+	host_logf(HOST_LOG_INFO, "screen bars: the GL thread's (%ux%u, the picture's %u rows, %u pages)", screen.xres,
+		screen.yres, screen.xres * 3 / 4, screen.yres_virtual / screen.yres);
+}
+
+static void bars_blacken(void)
+{
+	struct fb_var_screeninfo screen;
+	struct fb_fix_screeninfo fixed;
+	uint32_t gap, top, bottom, page;
+	unsigned char *memory;
+
+	if (bars_device < 0)
+		return;
+	if (!bars_screen(&screen, &fixed) || fixed.smem_len != bars_size ||
+		screen.xres * 3 / 4 != __atomic_load_n(&bars_band, __ATOMIC_RELAXED) ||
+		(memory = mmap(NULL, fixed.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, bars_device, 0)) == MAP_FAILED)
+	{
+		host_logf(HOST_LOG_WARN, "screen bars: fb0 changed; the game clears the window again");
+		bars_release();
+		return;
+	}
+	/* (the blit's odd row, if any, is below the picture in GL's rows: above
+	it in the framebuffer's) */
+	gap = screen.yres - screen.xres * 3 / 4;
+	bottom = gap / 2;
+	top = gap - bottom;
+	for (page = 0; page < screen.yres_virtual; page += screen.yres)
+	{
+		memset(memory + (size_t)page * fixed.line_length, 0, (size_t)top * fixed.line_length);
+		memset(memory + (size_t)(page + screen.yres - bottom) * fixed.line_length, 0, (size_t)bottom * fixed.line_length);
+	}
+	munmap(memory, fixed.smem_len);
+}
+
+/* host_gl_window_band, on the game's thread as it shows a frame: the rows
+of the window's middle band the game's 4:3 picture may be drawn in without
+a clear of the window, or 0 */
+static uint32_t threaded_gl_window_band(void)
+{
+	return __atomic_load_n(&bars_band, __ATOMIC_ACQUIRE);
+}
+
 static void run_swap(const void *data)
 {
 	const struct swap_call *call = data;
@@ -2638,6 +2753,8 @@ static void run_swap(const void *data)
 	held = host_monotonic_ns();
 	host_sdl_gl_swap_window(call->window);
 	swapped = host_monotonic_ns();
+	if (call->frame == BARS_FIRST_FRAME || (call->frame > BARS_FIRST_FRAME && call->frame % BARS_EVERY_FRAMES == 0))
+		bars_blacken();
 	if (frame_log || (maximum && !scale_settle && scale_slow(swapped)))
 		delay_read_after(&swapped_read);
 	/* (the split's end after the run delay's read, so that a wait for a
@@ -2812,6 +2929,7 @@ void *host_import_wrap(const char *name, void *function)
 		{ "host_gl_texture_thread", (void *)threaded_gl_texture_thread },
 		{ "host_gl_frame_due", (void *)threaded_gl_frame_due },
 		{ "host_gl_scale_step", (void *)threaded_gl_scale_step },
+		{ "host_gl_window_band", (void *)threaded_gl_window_band },
 		{ "host_gl_buffer_write_to", (void *)queued_gl_buffer_write_to },
 		{ "host_gl_fence_frame", (void *)queued_gl_fence_frame },
 		{ "host_gl_wait_frame", (void *)queued_gl_wait_frame },

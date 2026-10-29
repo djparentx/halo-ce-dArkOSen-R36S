@@ -83,6 +83,9 @@ game thread's frames, with its time */
 int host_profile_sampling(void);
 void host_profile_mark(uint32_t frame, uint32_t microseconds);
 
+/* the firmware SDL2's video driver, NULL before it is started (host_sdl2.c) */
+const char *host_sdl_video_driver(void);
+
 /* the fault handlers (host_memory.c) put first again, if a library took
 them after they were installed */
 void host_signal_handlers_first(void);
