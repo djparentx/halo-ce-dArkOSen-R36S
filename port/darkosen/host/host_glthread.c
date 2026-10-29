@@ -25,6 +25,7 @@ HALO_GL_THREAD=0 makes the calls on the game's thread, as before.
 */
 
 #include "host.h"
+#include "host_etc2.h"
 #include "host_glthread.h"
 #include "host_knulli.h"
 
@@ -2829,6 +2830,8 @@ void *host_import_wrap(const char *name, void *function)
 		const char *skip = getenv("HALO_DEBUG_SKIP_GL");
 		size_t length = strlen(name + 7);
 
+		/* (DXT textures as ETC2: host_etc2.c) */
+		function = host_etc2_wrap(name + 7, function);
 		void *direct = function;
 
 		/* HALO_GL_TIMING: the driver's function, timed */
@@ -2850,6 +2853,9 @@ void *host_import_wrap(const char *name, void *function)
 		}
 		return glthread_record_function(name + 7, function, direct);
 	}
+	/* (S3TC reported as supported, for host_etc2.c) */
+	if (function && !strcmp(name, "host_gl_has_extension"))
+		return host_etc2_has_extension(glthread_enabled() ? (void *)synced_gl_has_extension : function);
 	if (!function || !glthread_enabled())
 		return function;
 	for (index = 0; index < sizeof(host_functions) / sizeof(host_functions[0]); index++)
