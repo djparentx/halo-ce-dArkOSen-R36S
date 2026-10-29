@@ -22,6 +22,7 @@ Android, each request goes to a thread that has one.
 
 #include <SDL2/SDL.h>
 #include <pthread.h>
+#include <glob.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -305,6 +306,25 @@ static long sysfs_number(const char *path)
 	return value;
 }
 
+/* the GPU's clock in MHz: the devfreq node is /sys/class/devfreq/gpu on some
+boards and <address>.gpu on others (the RK3326's is ff400000.gpu), found once */
+static long gpu_clock_mhz(void)
+{
+	static char path[256];
+	glob_t found;
+
+	if (!path[0])
+	{
+		strcpy(path, "-");
+		if (glob("/sys/class/devfreq/*gpu", 0, NULL, &found) == 0)
+		{
+			snprintf(path, sizeof(path), "%s/cur_freq", found.gl_pathv[0]);
+			globfree(&found);
+		}
+	}
+	return sysfs_number(path) / 1000000;
+}
+
 /* HALO_FPS_LOG=<seconds>: the frame rate, the longest frame, the resident
 memory, and the temperature and clocks the thermal governor allows, in the
 log at this interval */
@@ -362,7 +382,7 @@ static void frame_statistics(void)
 			resident_pages * (long)(getpagesize() / 1024) / 1024,
 			sysfs_number("/sys/class/thermal/thermal_zone0/temp") / 1000,
 			sysfs_number("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") / 1000,
-			sysfs_number("/sys/class/devfreq/gpu/cur_freq") / 1000000);
+			gpu_clock_mhz());
 		host_logf(HOST_LOG_INFO, "frame times: %u under 15 ms, %u 15-18, %u 18-22, %u 22-28, %u 28-35, %u over 35",
 			frame_buckets[0], frame_buckets[1], frame_buckets[2], frame_buckets[3], frame_buckets[4], frame_buckets[5]);
 		memset(frame_buckets, 0, sizeof(frame_buckets));
