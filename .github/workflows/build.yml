@@ -81,14 +81,12 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          name="halo-ce-dArkOSen-${GITHUB_SHA::8}"
-          tar -C dist -czf "$name.tar.gz" .
-          echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"
-          ls -l dist "$name.tar.gz"
+          echo "ARTIFACT=halo-ce-dArkOSen-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+          ls -lR dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: halo-ce-dArkOSen
-          path: ${{ env.ARCHIVE }}
+          name: ${{ env.ARTIFACT }}
+          path: dist/
           if-no-files-found: error
