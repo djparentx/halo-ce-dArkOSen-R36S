@@ -1,6 +1,6 @@
 [display]
 screen_width = 0
-render_scale = 0.75
+render_scale = 0.90
 interpolation = true
 fast_shaders = true
 fast_textures = true

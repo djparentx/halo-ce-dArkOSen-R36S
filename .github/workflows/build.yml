@@ -81,7 +81,7 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          echo "ARTIFACT=halo-ce-dArkOSen-${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+          echo "ARTIFACT=Halo-CE" >> "$GITHUB_ENV"
           ls -lR dist
 
       - name: Upload artifact

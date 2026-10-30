@@ -95,7 +95,6 @@ fi
 # first start only: settings for this handheld (the game keeps and extends config.toml)
 if [ ! -f config.toml ]; then
 	if ! { cp config.default.toml config.toml.new &&
-		sed -i 's/^render_scale[[:space:]]*=.*/render_scale = 0.5/' config.toml.new &&
 		mv -f config.toml.new config.toml; }; then
 		rm -f config.toml.new
 		echo "cannot write config.toml"
