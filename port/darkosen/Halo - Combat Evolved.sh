@@ -34,10 +34,6 @@ put() {
 	echo "$1" | $SUDO tee "$2" > /dev/null 2>&1
 }
 
-# the GPU is held at GPU_MAX_HZ or the highest step under it: 600 MHz hangs
-# the GPU under load on these boards (kernel hard-stop and reset, ~8.7 s)
-GPU_MAX_HZ="${HALO_GPU_MAX_HZ:-520000000}"
-
 restore() {
 	if [ -f "$SAVED" ]; then
 		read -r saved_governor saved_gpu_min saved_gpu_max < "$SAVED"
@@ -56,16 +52,6 @@ echo "$(cat "$CPU" 2> /dev/null || echo none) $(cat "$GPU/min_freq" 2> /dev/null
 trap restore EXIT
 
 put performance "$CPU"
-if [ -n "$GPU" ]; then
-	steps=$(tr ' ' '\n' < "$GPU/available_frequencies" 2> /dev/null | grep . | sort -n)
-	target=$(echo "$steps" | awk -v max="$GPU_MAX_HZ" '$1 <= max { t = $1 } END { print t }')
-	[ -z "$target" ] && target=$(echo "$steps" | head -n 1)
-	if [ -n "$target" ]; then
-		put "$target" "$GPU/min_freq"
-		put "$target" "$GPU/max_freq"
-		put "$target" "$GPU/min_freq"
-	fi
-fi
 
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
