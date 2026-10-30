@@ -108,3 +108,4 @@ index 05d28a3..18f54d2 100644
 +#endif
  	return opaque && decoded;
  }
+ 
