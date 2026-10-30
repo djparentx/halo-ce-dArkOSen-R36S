@@ -1,0 +1,110 @@
+diff --git a/port/linux/src/xbox_textures.c b/port/linux/src/xbox_textures.c
+index 05d28a3..18f54d2 100644
+--- a/port/linux/src/xbox_textures.c
++++ b/port/linux/src/xbox_textures.c
+@@ -842,6 +842,93 @@ static BOOL dxt1_texture_has_alpha(const unsigned char *base, const struct xgpu_
+ 	return FALSE;
+ }
+ 
++/* darkosen: whether every texel of a DXT3 or DXT5 level, inside the level,
++has an alpha of 255, from its blocks alone (the alphas dxt_decode_level
++gives them) */
++static BOOL dxt_alpha_level_opaque(unsigned char kind, const unsigned char *source, unsigned long width,
++	unsigned long height, unsigned long depth)
++{
++	unsigned long blocks_x = (width + 3) / 4, blocks_y = (height + 3) / 4, z, bx, by, x, y;
++
++	for (z = 0; z < depth; z++)
++	{
++		for (by = 0; by < blocks_y; by++)
++		{
++			unsigned long rows = height - by * 4 < 4 ? height - by * 4 : 4;
++
++			for (bx = 0; bx < blocks_x; bx++)
++			{
++				const unsigned char *block = source + ((z * blocks_y + by) * blocks_x + bx) * 16;
++				unsigned long columns = width - bx * 4 < 4 ? width - bx * 4 : 4;
++				unsigned long values[8];
++				unsigned long long bits = 0;
++				int index;
++
++				if (kind == _texel_dxt5)
++				{
++					unsigned long a0 = block[0], a1 = block[1];
++
++					for (index = 0; index < 6; index++)
++						bits |= (unsigned long long)block[2 + index] << (index * 8);
++					values[0] = a0;
++					values[1] = a1;
++					if (a0 > a1)
++					{
++						for (index = 2; index < 8; index++)
++							values[index] = ((8 - index) * a0 + (index - 1) * a1) / 7;
++					}
++					else
++					{
++						for (index = 2; index < 6; index++)
++							values[index] = ((6 - index) * a0 + (index - 1) * a1) / 5;
++						values[6] = 0;
++						values[7] = 255;
++					}
++				}
++				for (y = 0; y < rows; y++)
++				{
++					for (x = 0; x < columns; x++)
++					{
++						index = (int)(y * 4 + x);
++						if (kind == _texel_dxt3 ? ((block[index / 2] >> ((index & 1) * 4)) & 0xf) != 0xf :
++							values[(bits >> (index * 3)) & 7] != 255)
++						{
++							return FALSE;
++						}
++					}
++				}
++			}
++		}
++	}
++	return TRUE;
++}
++
++/* darkosen: whether every texel of every level of every face of a DXT
++texture is opaque, for the textures the GPU decodes (S3TC reported, the
++levels made ETC2 by host_etc2.c): the guest does not decode them, so its
++texels are not looked at */
++static BOOL dxt_texture_opaque(unsigned char kind, const unsigned char *base,
++	const struct xgpu_texture_description *description)
++{
++	unsigned long faces = description->cube_map ? 6 : 1, face_size = xgpu_texture_face_size(description), face, level;
++
++	if (kind == _texel_dxt1)
++		return !dxt1_texture_has_alpha(base, description);
++	for (face = 0; face < faces; face++)
++	{
++		for (level = 0; level < description->levels; level++)
++		{
++			if (!dxt_alpha_level_opaque(kind, base + face * face_size + xgpu_texture_level_offset(description, level),
++				level_dimension(description->width, level), level_dimension(description->height, level),
++				level_dimension(description->depth, level)))
++			{
++				return FALSE;
++			}
++		}
++	}
++	return TRUE;
++}
++
+ /* DXT1 straight to 16-bit texels: the texels dxt_decode_level and
+ texel_pack make, without the 32-bit ones between. Whether one of them is
+ transparent */
+@@ -1190,6 +1277,12 @@ static int upload(GLuint texture, GLenum target, const struct xgpu_texture_descr
+ 	}
+ 	decoded = converted != NULL;
+ 	texture_dump(target, description);
++#ifdef HALO_ANDROID
++	/* darkosen: compressed levels the GPU decodes are opaque when their
++	blocks say so (opaque is FALSE here when the alpha is another channel's) */
++	if (!converted && opaque && description->compressed)
++		return dxt_texture_opaque(information.kind, base, description);
++#endif
+ 	return opaque && decoded;
+ }
